@@ -4,29 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Authenticator Pro</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@0.321.0/dist/umd/lucide.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #0c0c0e; color: #f4f4f5; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background-color: #0c0c0e; color: #f4f4f5; margin: 0; }
         .mono { font-family: monospace; }
     </style>
-    <script>
-        // Ez a kód segít megtalálni a hibát, ha elszállna az oldal
-        window.onerror = function(msg, url, line) {
-            alert("Rendszerhiba történt!\nÜzenet: " + msg + "\nSor: " + line);
-            return false;
-        };
-    </script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
         const API_BASE = window.location.origin + '/api';
 
         const App = () => {
@@ -40,13 +33,16 @@
             const [guestData, setGuestData] = useState(null);
             const [error, setError] = useState('');
 
-            // Nézet kiválasztása
+            // Ikonok biztonságos betöltése
+            const updateIcons = () => {
+                try { if (window.lucide) window.lucide.createIcons(); } catch(e) {}
+            };
+
             useEffect(() => {
                 const path = window.location.pathname;
-                const params = new URLSearchParams(window.location.search);
-                const shareToken = params.get('share');
-
-                if (path === '/admin') {
+                const shareToken = new URLSearchParams(window.location.search).get('share');
+                
+                if (path.includes('/admin')) {
                     setView(token ? 'admin_dashboard' : 'admin_login');
                 } else if (shareToken) {
                     setView('guest_login');
@@ -55,26 +51,24 @@
                 }
             }, [token]);
 
-            // Ikonok frissítése
-            useEffect(() => { 
-                if (window.lucide) {
-                    try { window.lucide.createIcons(); } catch(e) {}
-                }
-            }, [view, keys, shares, guestData]);
+            useEffect(() => { updateIcons(); }, [view, keys, shares, guestData]);
 
-            // Admin adatok letöltése
             const refreshAdmin = async () => {
                 if (!token || view !== 'admin_dashboard') return;
                 try {
                     const h = { 'Authorization': token };
-                    const kRes = await fetch(`${API_BASE}/keys`, { headers: h });
-                    const sRes = await fetch(`${API_BASE}/shares`, { headers: h });
-                    
-                    if (kRes.ok) setKeys(await kRes.json());
-                    if (sRes.ok) setShares(await sRes.json());
-                    
-                    if (kRes.status === 401) handleLogout();
-                } catch (e) { console.error("Hiba az adatok letöltésekor"); }
+                    const [kRes, sRes] = await Promise.all([
+                        fetch(`${API_BASE}/keys`, { headers: h }),
+                        fetch(`${API_BASE}/shares`, { headers: h })
+                    ]);
+                    if (kRes.ok) {
+                        setKeys(await kRes.json());
+                        setShares(await sRes.json());
+                    } else if (kRes.status === 401) {
+                        localStorage.removeItem('owner_token');
+                        setToken(null);
+                    }
+                } catch (e) {}
             };
 
             useEffect(() => {
@@ -96,66 +90,47 @@
                     if (res.ok) {
                         localStorage.setItem('owner_token', data.token);
                         setToken(data.token);
-                    } else { alert(data.error); }
+                    } else alert(data.error);
                 } catch (e) { alert("Szerver hiba"); }
             };
 
-            const handleLogout = () => {
-                localStorage.removeItem('owner_token');
-                setToken(null);
-                window.location.href = '/admin';
-            };
-
-            const updateShare = async (id, payload) => {
-                await fetch(`${API_BASE}/shares/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': token },
-                    body: JSON.stringify(payload)
-                });
-                refreshAdmin();
-            };
-
             const handleGuestLogin = async () => {
-                const params = new URLSearchParams(window.location.search);
-                const res = await fetch(`${API_BASE}/public/code`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: params.get('share'), label: guestName, password: guestPass })
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    setGuestData(data);
-                    setError('');
-                    setTimeout(handleGuestLogin, 5000);
-                } else { setError(data.error); }
+                const sToken = new URLSearchParams(window.location.search).get('share');
+                try {
+                    const res = await fetch(`${API_BASE}/public/code`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: sToken, label: guestName, password: guestPass })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        setGuestData(data);
+                        setError('');
+                        setTimeout(handleGuestLogin, 5000);
+                    } else setError(data.error);
+                } catch (e) { setError("Hálózati hiba"); }
             };
 
-            const Icon = ({ name, size = 20 }) => <i data-lucide={name} style={{ width: size, height: size }}></i>;
+            const Icon = ({ name }) => <i data-lucide={name} style={{ width: 20, height: 20 }}></i>;
 
-            // --- NÉZETEK ---
-
-            if (view === 'loading') return (
-                <div className="min-h-screen flex items-center justify-center">
-                    <div className="text-blue-500 animate-pulse font-bold">Betöltés...</div>
-                </div>
-            );
+            if (view === 'loading') return <div className="min-h-screen flex items-center justify-center font-bold">Betöltés...</div>;
 
             if (view === 'guest_login') return (
                 <div className="min-h-screen flex items-center justify-center p-6 text-center">
                     <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem]">
                         {!guestData ? (
                             <>
-                                <h1 className="text-2xl font-black mb-6">Bejelentkezés</h1>
+                                <h1 className="text-2xl font-black mb-6">Belépés</h1>
                                 {error && <div className="bg-red-500/10 text-red-500 p-3 rounded-xl text-xs mb-4">{error}</div>}
                                 <input type="text" placeholder="Név" className="w-full bg-zinc-800 p-4 rounded-xl mb-3 outline-none" value={guestName} onChange={e => setGuestName(e.target.value)} />
                                 <input type="password" placeholder="Jelszó" className="w-full bg-zinc-800 p-4 rounded-xl mb-6 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} />
-                                <button onClick={handleGuestLogin} className="w-full bg-white text-black font-black py-4 rounded-xl">BELÉPÉS</button>
+                                <button onClick={handleGuestLogin} className="w-full bg-white text-black font-black py-4 rounded-xl">KÓD MEGJELENÍTÉSE</button>
                             </>
                         ) : (
                             <div>
-                                <div className="text-blue-500 text-xs font-black uppercase mb-2">{guestData.name}</div>
-                                <div className="text-6xl font-black mono tracking-tighter mb-8">{guestData.code}</div>
-                                <div className="text-red-500 text-[10px] font-bold">Idő: {guestData.sessionExpiresIn} mp</div>
+                                <div className="text-blue-500 text-xs font-black mb-2 uppercase">{guestData.name}</div>
+                                <div className="text-6xl font-black mono mb-8">{guestData.code}</div>
+                                <div className="text-red-500 text-[10px] font-bold">HÁTRALEVŐ IDŐ: {guestData.sessionExpiresIn} MP</div>
                             </div>
                         )}
                     </div>
@@ -165,8 +140,8 @@
             if (view === 'admin_login') return (
                 <div className="min-h-screen flex items-center justify-center p-6 text-center">
                     <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-[2rem]">
-                        <h1 className="text-xl font-bold mb-6 italic text-blue-500">ADMIN LOGIN</h1>
-                        <input type="password" placeholder="Mesterjelszó" className="w-full bg-zinc-800 p-4 rounded-xl mb-4 outline-none" value={adminPass} onChange={e => setAdminPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdminLogin()} />
+                        <h1 className="text-xl font-bold mb-6 italic">ADMIN</h1>
+                        <input type="password" placeholder="Mesterjelszó" className="w-full bg-zinc-800 p-4 rounded-xl mb-4 outline-none focus:ring-1 focus:ring-blue-600" value={adminPass} onChange={e => setAdminPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdminLogin()} />
                         <button onClick={handleAdminLogin} className="w-full bg-blue-600 font-bold py-4 rounded-xl">BELÉPÉS</button>
                     </div>
                 </div>
@@ -176,13 +151,13 @@
                 <div className="max-w-6xl mx-auto p-6 md:p-12">
                     <header className="flex justify-between items-center mb-12 border-b border-zinc-800 pb-6">
                         <h1 className="text-2xl font-black italic">OWNER<span className="text-blue-600">AUTH</span></h1>
-                        <button onClick={handleLogout} className="text-zinc-500 hover:text-white"><Icon name="log-out" /></button>
+                        <button onClick={() => {localStorage.removeItem('owner_token'); setToken(null);}} className="text-zinc-500"><Icon name="log-out" /></button>
                     </header>
                     <div className="grid lg:grid-cols-2 gap-12">
                         <section>
-                            <h2 className="text-lg font-bold mb-6 text-zinc-400">Saját Kulcsok</h2>
+                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2 text-zinc-400"><Icon name="key" /> Kulcsok</h2>
                             <div className="space-y-4">
-                                {(keys || []).length > 0 ? keys.map(k => (
+                                {(keys || []).map(k => (
                                     <div key={k.id} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex justify-between items-center">
                                         <div>
                                             <div className="text-[10px] text-blue-500 font-black uppercase">{k.name}</div>
@@ -192,54 +167,57 @@
                                             const label = prompt('Kinek a részére?');
                                             if(label) await fetch(`${API_BASE}/shares`, {method:'POST', headers:{'Authorization':token, 'Content-Type':'application/json'}, body:JSON.stringify({keyId:k.id, label})});
                                             refreshAdmin();
-                                        }} className="bg-zinc-800 p-4 rounded-2xl hover:bg-blue-600"><Icon name="share-2" /></button>
+                                        }} className="bg-zinc-800 p-4 rounded-2xl"><Icon name="share-2" /></button>
                                     </div>
-                                )) : <div className="text-zinc-600 italic">Nincsenek kulcsok.</div>}
+                                ))}
+                                <button onClick={async () => {
+                                    const name = prompt('Kulcs neve:');
+                                    const secret = prompt('Secret (Base32):');
+                                    if(name && secret) await fetch(`${API_BASE}/keys`, {method:'POST', headers:{'Authorization':token, 'Content-Type':'application/json'}, body:JSON.stringify({name, secret})});
+                                    refreshAdmin();
+                                }} className="w-full border-2 border-dashed border-zinc-800 p-4 rounded-3xl text-zinc-600 hover:text-white hover:border-zinc-500">+ Új kulcs hozzáadása</button>
                             </div>
                         </section>
                         <section>
-                            <h2 className="text-lg font-bold mb-6 text-zinc-400">Megosztások (IP)</h2>
+                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2 text-zinc-400"><Icon name="users" /> Megosztások</h2>
                             <div className="space-y-4">
-                                {(shares || []).length > 0 ? shares.map(s => (
+                                {(shares || []).map(s => (
                                     <div key={s._id} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
                                         <div className="flex justify-between mb-4">
                                             <span className="font-bold text-blue-400">{s.label}</span>
-                                            <button onClick={async () => {if(confirm('Törlöd?')) {await fetch(`${API_BASE}/shares/${s._id}`, {method:'DELETE', headers:{'Authorization':token}}); refreshAdmin();}}} className="text-zinc-600 hover:text-red-500"><Icon name="trash" size={16} /></button>
+                                            <button onClick={async () => {if(confirm('Törlöd?')) {await fetch(`${API_BASE}/shares/${s._id}`, {method:'DELETE', headers:{'Authorization':token}}); refreshAdmin();}}} className="text-zinc-600 hover:text-red-500"><Icon name="trash" /></button>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <label className="text-[10px] uppercase text-zinc-500 font-bold">Jelszó</label>
-                                                <input type="text" className="w-full bg-zinc-800 text-xs p-2 rounded mt-1 border border-zinc-700 outline-none" value={s.password} onChange={(e) => updateShare(s._id, {password: e.target.value})} />
+                                                <input type="text" className="w-full bg-zinc-800 text-xs p-2 rounded mt-1 border border-zinc-700" value={s.password} onChange={async (e) => {
+                                                    await fetch(`${API_BASE}/shares/${s._id}`, {method:'PATCH', headers:{'Authorization':token, 'Content-Type':'application/json'}, body:JSON.stringify({password: e.target.value})});
+                                                    refreshAdmin();
+                                                }} />
                                             </div>
                                             <div>
-                                                <label className="text-[10px] uppercase text-zinc-500 font-bold">IP</label>
+                                                <label className="text-[10px] uppercase text-zinc-500 font-bold">IP rögzítve</label>
                                                 <div className="flex items-center gap-2 mt-1">
                                                     <div className="bg-zinc-800 text-[9px] p-2 rounded flex-1 truncate text-zinc-400">{s.allowedIp || 'Vár...'}</div>
-                                                    {s.allowedIp && <button onClick={() => updateShare(s._id, {allowedIp: null})} className="text-red-500"><Icon name="refresh-cw" size={12} /></button>}
+                                                    {s.allowedIp && <button onClick={async () => {
+                                                        await fetch(`${API_BASE}/shares/${s._id}`, {method:'PATCH', headers:{'Authorization':token, 'Content-Type':'application/json'}, body:JSON.stringify({allowedIp: null})});
+                                                        refreshAdmin();
+                                                    }} className="text-red-500"><Icon name="refresh-cw" /></button>}
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="mt-4 pt-4 border-t border-zinc-800 text-[9px] text-zinc-600 break-all select-all">
+                                        <div className="mt-4 pt-4 border-t border-zinc-800 text-[9px] text-zinc-500 break-all select-all">
                                             {window.location.origin}/?share={s.shareToken}
                                         </div>
                                     </div>
-                                )) : <div className="text-zinc-600 italic">Nincsenek aktív megosztások.</div>}
+                                ))}
                             </div>
                         </section>
                     </div>
                 </div>
             );
 
-            return (
-                <div className="min-h-screen flex items-center justify-center p-6 text-center text-zinc-600">
-                    <div>
-                        <Icon name="alert-triangle" size={40} className="mx-auto mb-4" />
-                        <h1 className="text-xl font-bold">Nincs hozzáférés</h1>
-                        <p className="text-sm">Használd a megosztási linket vagy jelentkezz be.</p>
-                        <a href="/admin" className="mt-4 inline-block text-blue-500 text-xs font-bold">ADMIN BELÉPÉS</a>
-                    </div>
-                </div>
-            );
+            return <div className="min-h-screen flex items-center justify-center p-6 text-zinc-500">Nincs hozzáférésed.</div>;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
