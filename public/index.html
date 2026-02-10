@@ -3,257 +3,179 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authenticator Pro</title>
+    <title>AUTH PRO</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #000; color: #fff; margin: 0; }
-        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.05); }
-        .mono { font-family: 'Courier New', Courier, monospace; }
-        input { background: rgba(255,255,255,0.05) !important; border: 1px solid rgba(255,255,255,0.1) !important; }
+        body { background: #000; color: #fff; font-family: sans-serif; }
+        .card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 24px; }
+        input { background: #111 !important; border: 1px solid #222 !important; color: white !important; }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
     <script type="text/babel">
         const { useState, useEffect } = React;
 
         const App = () => {
             const [view, setView] = useState('loading');
             const [token, setToken] = useState(localStorage.getItem('admin_token'));
-            
-            // Admin states
             const [keys, setKeys] = useState([]);
             const [shares, setShares] = useState([]);
-            
-            // Guest states
-            const [guestName, setGuestName] = useState('');
-            const [guestPass, setGuestPass] = useState('');
             const [guestData, setGuestData] = useState(null);
             const [error, setError] = useState('');
 
             useEffect(() => {
                 const path = window.location.pathname;
-                const params = new URLSearchParams(window.location.search);
-                
-                if (path === '/admin') {
-                    setView(token ? 'admin_dashboard' : 'admin_login');
-                } else if (params.get('share')) {
-                    setView('guest_login');
-                } else {
-                    setView('welcome');
-                }
+                const share = new URLSearchParams(window.location.search).get('share');
+                if (path === '/admin') setView(token ? 'dashboard' : 'login');
+                else if (share) setView('guest');
+                else setView('no_access');
             }, [token]);
 
-            useEffect(() => {
-                if (window.lucide) window.lucide.createIcons();
-            }, [view, keys, shares, guestData]);
-
-            // --- API HÍVÁSOK ---
-            const apiFetch = async (url, method = 'GET', body = null) => {
-                const headers = { 'Content-Type': 'application/json' };
-                if (token) headers['Authorization'] = token;
-                
+            const fetchApi = async (url, method = 'GET', body = null) => {
                 const res = await fetch('/api' + url, {
-                    method,
-                    headers,
+                    method, headers: { 'Content-Type': 'application/json', 'Authorization': token },
                     body: body ? JSON.stringify(body) : null
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Hiba történt');
+                if (!res.ok) throw new Error(data.error || 'Hiba');
                 return data;
             };
 
-            const refreshAdminData = async () => {
+            const loadData = async () => {
+                if (view !== 'dashboard') return;
                 try {
-                    const [k, s] = await Promise.all([apiFetch('/keys'), apiFetch('/shares')]);
-                    setKeys(k || []);
-                    setShares(s || []);
-                } catch (e) {
-                    if (e.message.includes('Bejelentkezés')) handleLogout();
-                }
+                    const [k, s] = await Promise.all([fetchApi('/keys'), fetchApi('/shares')]);
+                    setKeys(k || []); setShares(s || []);
+                } catch (e) { if (e.message.includes('Nincs')) setToken(null); }
             };
 
             useEffect(() => {
-                if (view === 'admin_dashboard') {
-                    refreshAdminData();
-                    const i = setInterval(refreshAdminData, 10000);
-                    return () => clearInterval(i);
-                }
+                if (view === 'dashboard') { loadData(); const i = setInterval(loadData, 10000); return () => clearInterval(i); }
             }, [view]);
 
-            const handleAdminLogin = async (e) => {
-                e.preventDefault();
-                const pass = e.target.password.value;
-                try {
-                    const data = await apiFetch('/login', 'POST', { password: pass });
-                    localStorage.setItem('admin_token', data.token);
-                    setToken(data.token);
-                } catch (e) { alert(e.message); }
-            };
+            if (view === 'loading') return <div className="p-10 text-center">Töltés...</div>;
 
-            const handleLogout = () => {
-                localStorage.removeItem('admin_token');
-                setToken(null);
-                window.location.href = '/admin';
-            };
+            if (view === 'login') return (
+                <div className="flex h-screen items-center justify-center p-6">
+                    <div className="card w-full max-w-sm p-10 text-center">
+                        <h1 className="mb-8 text-2xl font-bold">ADMIN PANEL</h1>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            try {
+                                const d = await fetchApi('/login', 'POST', { password: e.target.pass.value });
+                                localStorage.setItem('admin_token', d.token); setToken(d.token);
+                            } catch (e) { alert(e.message); }
+                        }}>
+                            <input name="pass" type="password" placeholder="Jelszó" className="mb-4 w-full rounded-xl p-4 outline-none" />
+                            <button className="w-full rounded-xl bg-white py-4 font-bold text-black">BELÉPÉS</button>
+                        </form>
+                    </div>
+                </div>
+            );
 
-            const handleGuestLogin = async (e) => {
-                if (e) e.preventDefault();
-                const sToken = new URLSearchParams(window.location.search).get('share');
-                try {
-                    const data = await apiFetch('/public/code', 'POST', { 
-                        token: sToken, label: guestName, password: guestPass 
-                    });
-                    setGuestData(data);
-                    setError('');
-                    setTimeout(handleGuestLogin, 5000); // Automatikus frissítés
-                } catch (e) { setError(e.message); }
-            };
+            if (view === 'dashboard') return (
+                <div className="mx-auto max-w-5xl p-6 md:p-12">
+                    <div className="mb-12 flex items-center justify-between">
+                        <h1 className="text-xl font-black">ADMIN <span className="text-zinc-600">DASHBOARD</span></h1>
+                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500">Kijelentkezés</button>
+                    </div>
+                    
+                    <div className="grid gap-12 md:grid-cols-2">
+                        <section>
+                            <div className="mb-6 flex items-center justify-between text-zinc-400">
+                                <h2 className="font-bold uppercase tracking-widest text-xs">Saját Kulcsok</h2>
+                                <button onClick={async () => {
+                                    const name = prompt('Név:'); const secret = prompt('Secret:');
+                                    if(name && secret) { await fetchApi('/keys', 'POST', {name, secret}); loadData(); }
+                                }} className="text-xs text-white bg-zinc-800 px-3 py-1 rounded-full">+ ÚJ</button>
+                            </div>
+                            <div className="space-y-4">
+                                {keys.length > 0 ? keys.map(k => (
+                                    <div key={k.id} className="card p-6 flex justify-between items-center">
+                                        <div><div className="text-[10px] text-zinc-500 uppercase font-bold">{k.name}</div><div className="text-3xl font-black">{k.code}</div></div>
+                                        <div className="flex gap-2">
+                                            <button onClick={async () => {
+                                                const label = prompt('Kinek adod? (Név)');
+                                                if(label) { await fetchApi('/shares', 'POST', {keyId: k.id, label}); loadData(); }
+                                            }} className="bg-zinc-800 p-3 rounded-xl hover:bg-white hover:text-black transition-all">Megosztás</button>
+                                            <button onClick={async () => { if(confirm('Törlöd?')) { await fetchApi('/keys/'+k.id, 'DELETE'); loadData(); } }} className="text-red-500 p-3">X</button>
+                                        </div>
+                                    </div>
+                                )) : <div className="text-zinc-700 italic">Még nincs kulcsod...</div>}
+                            </div>
+                        </section>
 
-            const Icon = ({ name, size = 20, className = "" }) => <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+                        <section>
+                            <h2 className="mb-6 font-bold uppercase tracking-widest text-xs text-zinc-400">Megosztások (IP Kontroll)</h2>
+                            <div className="space-y-4">
+                                {shares.length > 0 ? shares.map(s => (
+                                    <div key={s._id} className="card p-6">
+                                        <div className="mb-4 flex justify-between items-center">
+                                            <span className="font-bold text-white">{s.label}</span>
+                                            <button onClick={async () => { if(confirm('Törlöd?')) { await fetchApi('/shares/'+s._id, 'DELETE'); loadData(); } }} className="text-zinc-700">Törlés</button>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 text-xs">
+                                            <div>
+                                                <div className="text-[9px] text-zinc-500 uppercase font-bold mb-1">Jelszó</div>
+                                                <input type="text" className="w-full bg-transparent p-2 rounded-lg" value={s.password} onChange={async (e) => {
+                                                    await fetchApi('/shares/'+s._id, 'PATCH', {password: e.target.value}); loadData();
+                                                }} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[9px] text-zinc-500 uppercase font-bold mb-1">IP</div>
+                                                <div className="flex items-center justify-between p-2">
+                                                    <span className="truncate text-zinc-400">{s.allowedIp || 'Vár...'}</span>
+                                                    {s.allowedIp && <button onClick={() => fetchApi('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(loadData)} className="text-red-500 ml-2">↻</button>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-4 border-t border-zinc-900 pt-4 text-[9px] text-zinc-700 select-all">{window.location.origin}/?share={s.shareToken}</div>
+                                    </div>
+                                )) : <div className="text-zinc-700 italic">Nincs megosztásod...</div>}
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            );
 
-            // --- NÉZETEK ---
-
-            if (view === 'loading') return <div className="h-screen flex items-center justify-center animate-pulse text-zinc-500">Rendszer töltése...</div>;
-
-            // 1. Vendég Belépés (Főoldal)
-            if (view === 'guest_login') return (
-                <div className="min-h-screen flex items-center justify-center p-6">
-                    <div className="w-full max-w-md glass p-10 rounded-[2.5rem] shadow-2xl">
+            if (view === 'guest') return (
+                <div className="flex h-screen items-center justify-center p-6 text-center">
+                    <div className="card w-full max-w-md p-10">
                         {!guestData ? (
-                            <form onSubmit={handleGuestLogin} className="text-center">
-                                <div className="w-20 h-20 bg-white text-black rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl">
-                                    <Icon name="key-round" size={32} />
-                                </div>
-                                <h1 className="text-3xl font-extrabold mb-2">Belépés</h1>
-                                <p className="text-zinc-500 text-sm mb-8">Add meg a kapott adataidat</p>
-                                {error && <div className="bg-red-500/10 text-red-500 p-4 rounded-2xl text-xs font-bold mb-6">{error}</div>}
-                                <input type="text" placeholder="Név" required className="w-full p-4 rounded-2xl mb-4 outline-none focus:ring-2 focus:ring-white/20" value={guestName} onChange={e => setGuestName(e.target.value)} />
-                                <input type="password" placeholder="Jelszó" required className="w-full p-4 rounded-2xl mb-8 outline-none focus:ring-2 focus:ring-white/20" value={guestPass} onChange={e => setGuestPass(e.target.value)} />
-                                <button type="submit" className="w-full bg-white text-black font-extrabold py-5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all">HOZZÁFÉRÉS</button>
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                const st = new URLSearchParams(window.location.search).get('share');
+                                try {
+                                    const d = await fetchApi('/public/code', 'POST', { token: st, label: guestName, password: guestPass });
+                                    setGuestData(d); setError('');
+                                    setInterval(async () => {
+                                        const d2 = await fetchApi('/public/code', 'POST', { token: st, label: guestName, password: guestPass });
+                                        setGuestData(d2);
+                                    }, 5000);
+                                } catch (e) { setError(e.message); }
+                            }}>
+                                <h1 className="mb-8 text-2xl font-bold">HOZZÁFÉRÉS</h1>
+                                {error && <div className="mb-4 text-red-500 text-xs font-bold">{error}</div>}
+                                <input placeholder="Név" className="mb-3 w-full rounded-xl p-4 outline-none" value={guestName} onChange={e => setGuestName(e.target.value)} required />
+                                <input type="password" placeholder="Jelszó" className="mb-8 w-full rounded-xl p-4 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} required />
+                                <button className="w-full rounded-xl bg-white py-4 font-bold text-black">KÓD MUTATÁSA</button>
                             </form>
                         ) : (
-                            <div className="text-center">
-                                <div className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-4">{guestData.name}</div>
-                                <div className="text-7xl font-black mono tracking-tighter mb-10 text-white">{guestData.code}</div>
-                                <div className="inline-flex items-center gap-2 bg-red-500/10 text-red-500 px-4 py-2 rounded-full text-[10px] font-bold uppercase">
-                                    <Icon name="clock" size={12} /> Hátralévő időd: {guestData.expiresIn} mp
-                                </div>
+                            <div>
+                                <div className="mb-2 text-xs font-bold uppercase text-zinc-500">{guestData.name}</div>
+                                <div className="mb-8 text-6xl font-black tracking-tighter">{guestData.code}</div>
+                                <div className="text-[10px] font-bold text-red-500">HÁTRALEVŐ IDŐ: {guestData.expiresIn} MP</div>
                             </div>
                         )}
                     </div>
                 </div>
             );
 
-            // 2. Admin Login
-            if (view === 'admin_login') return (
-                <div className="min-h-screen flex items-center justify-center p-6">
-                    <form onSubmit={handleAdminLogin} className="w-full max-w-sm glass p-10 rounded-[2.5rem] text-center">
-                        <Icon name="shield-check" size={48} className="mx-auto mb-6 text-white" />
-                        <h1 className="text-2xl font-bold mb-8">Adminisztráció</h1>
-                        <input name="password" type="password" placeholder="Mesterjelszó" className="w-full p-4 rounded-2xl mb-6 outline-none" required />
-                        <button className="w-full bg-white text-black font-bold py-4 rounded-2xl">BELÉPÉS</button>
-                    </form>
-                </div>
-            );
-
-            // 3. Admin Dashboard
-            if (view === 'admin_dashboard') return (
-                <div className="max-w-6xl mx-auto p-6 md:p-12">
-                    <header className="flex justify-between items-center mb-16">
-                        <h1 className="text-2xl font-black tracking-tighter">AUTHENTICATOR<span className="text-zinc-500">.PRO</span></h1>
-                        <button onClick={handleLogout} className="bg-zinc-900 p-3 rounded-xl hover:bg-red-500/10 hover:text-red-500 transition-all"><Icon name="log-out" /></button>
-                    </header>
-
-                    <div className="grid lg:grid-cols-2 gap-12">
-                        {/* KULCSOK SECTION */}
-                        <section>
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-xl font-bold flex items-center gap-2 text-zinc-400"><Icon name="cpu" /> Kulcsok</h2>
-                                <button onClick={async () => {
-                                    const name = prompt('Név:');
-                                    const secret = prompt('Secret:');
-                                    if(name && secret) await apiFetch('/keys', 'POST', {name, secret});
-                                    refreshAdminData();
-                                }} className="bg-white text-black text-xs font-black px-4 py-2 rounded-lg">+ ÚJ KULCS</button>
-                            </div>
-                            <div className="space-y-4">
-                                {keys.map(k => (
-                                    <div key={k.id} className="glass p-6 rounded-3xl flex justify-between items-center group">
-                                        <div>
-                                            <div className="text-[10px] text-zinc-500 font-bold uppercase mb-1">{k.name}</div>
-                                            <div className="text-4xl font-black mono text-white">{k.code}</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={async () => {
-                                                const label = prompt('Kinek a része? (Név)');
-                                                if(label) await apiFetch('/shares', 'POST', {keyId: k.id, label});
-                                                refreshAdminData();
-                                            }} className="p-3 bg-white/5 rounded-xl hover:bg-white hover:text-black transition-all"><Icon name="share-2" /></button>
-                                            <button onClick={async () => {
-                                                if(confirm('Törlöd?')) await apiFetch('/keys/'+k.id, 'DELETE');
-                                                refreshAdminData();
-                                            }} className="p-3 bg-white/5 rounded-xl hover:bg-red-500 transition-all"><Icon name="trash-2" /></button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-
-                        {/* MEGOSZTÁSOK SECTION */}
-                        <section>
-                            <h2 className="text-xl font-bold mb-8 flex items-center gap-2 text-zinc-400"><Icon name="users" /> Aktív Megosztások</h2>
-                            <div className="space-y-4">
-                                {shares.map(s => (
-                                    <div key={s._id} className="glass p-6 rounded-3xl">
-                                        <div className="flex justify-between mb-6">
-                                            <div className="font-bold text-lg">{s.label}</div>
-                                            <button onClick={async () => {
-                                                if(confirm('Törlöd?')) await apiFetch('/shares/'+s._id, 'DELETE');
-                                                refreshAdminData();
-                                            }} className="text-zinc-600 hover:text-red-500"><Icon name="x" /></button>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
-                                            <div className="bg-white/5 p-3 rounded-2xl">
-                                                <div className="text-[9px] text-zinc-500 uppercase font-bold mb-1">Jelszó (Szerkeszthető)</div>
-                                                <input type="text" className="w-full bg-transparent border-none p-0 mono font-bold" value={s.password} onChange={async (e) => {
-                                                    await apiFetch('/shares/'+s._id, 'PATCH', {password: e.target.value});
-                                                    refreshAdminData();
-                                                }} />
-                                            </div>
-                                            <div className="bg-white/5 p-3 rounded-2xl relative">
-                                                <div className="text-[9px] text-zinc-500 uppercase font-bold mb-1">Eszköz IP</div>
-                                                <div className="mono text-[10px] truncate pr-6">{s.allowedIp || 'Várakozás...'}</div>
-                                                {s.allowedIp && <button onClick={() => apiFetch('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(refreshAdminData)} className="absolute right-3 top-7 text-red-500"><Icon name="refresh-cw" size={12}/></button>}
-                                            </div>
-                                        </div>
-                                        <div className="text-[10px] text-zinc-500 break-all select-all font-bold opacity-40 hover:opacity-100 transition-opacity">
-                                            {window.location.origin}/?share={s.shareToken}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
-                </div>
-            );
-
-            // Üdvözlő képernyő (Ha nincs link)
-            return (
-                <div className="h-screen flex items-center justify-center text-center p-6">
-                    <div>
-                        <Icon name="shield-off" size={64} className="mx-auto mb-6 text-zinc-800" />
-                        <h1 className="text-xl font-bold text-zinc-500">Nincs hozzáférésed ehhez az oldalhoz.</h1>
-                        <a href="/admin" className="mt-8 inline-block text-zinc-600 text-xs font-bold border border-zinc-800 px-6 py-2 rounded-full hover:bg-white hover:text-black transition-all uppercase tracking-widest">Admin Belépés</a>
-                    </div>
-                </div>
-            );
+            return <div className="p-10 text-center">Nincs hozzáférésed.</div>;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
