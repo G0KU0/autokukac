@@ -8,10 +8,11 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.set('trust proxy', true); // Render proxy támogatás
+app.set('trust proxy', true); 
 app.use(express.json());
 app.use(cors());
 
+// Konfiguráció
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-123';
@@ -48,6 +49,7 @@ const isOwner = (req, res, next) => {
   } catch (e) { res.status(401).json({ error: 'Érvénytelen munkamenet' }); }
 };
 
+// API Útvonalak
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
   if (password === MASTER_PASSWORD) {
@@ -58,12 +60,14 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/keys', isOwner, async (req, res) => {
-  const keys = await Key.find();
-  res.json(keys.map(k => ({
-    id: k._id, name: k.name,
-    code: otplib.authenticator.generate(k.secret),
-    remaining: otplib.authenticator.timeRemaining()
-  })));
+  try {
+    const keys = await Key.find();
+    res.json(keys.map(k => ({
+      id: k._id, name: k.name,
+      code: otplib.authenticator.generate(k.secret),
+      remaining: otplib.authenticator.timeRemaining()
+    })));
+  } catch (e) { res.status(500).json({ error: "DB hiba" }); }
 });
 
 app.post('/api/keys', isOwner, async (req, res) => {
@@ -136,7 +140,6 @@ app.post('/api/public/code', async (req, res) => {
   });
 });
 
-// FONTOS: Ez biztosítja, hogy bármilyen útvonalon (pl. /admin) betöltődjön az oldal
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
