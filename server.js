@@ -1,5 +1,5 @@
 /**
- * SZERVER OLDAL (Backend) - Javítva a weboldal kiszolgálásához
+ * SZERVER OLDAL (Backend) - Frissítve 1 perces lejárati idővel
  */
 require('dotenv').config();
 const express = require('express');
@@ -9,7 +9,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const cors = require('cors');
-const path = require('path'); // Új modul az elérési utakhoz
+const path = require('path');
 
 const app = express();
 
@@ -23,8 +23,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-a-tokenekhez';
 const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 const MASTER_PASSWORD_HASH = bcrypt.hashSync(MASTER_PASSWORD, 10);
 
-// --- STATIKUS FÁJLOK KISZOLGÁLÁSA ---
-// Ez biztosítja, hogy a weboldal megjelenjen a főoldalon
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- ADATBÁZIS MODELLEK ---
@@ -39,7 +37,7 @@ const ShareSchema = new mongoose.Schema({
   label: { type: String, required: true },
   passwordHash: { type: String, required: true },
   shareToken: { type: String, required: true, unique: true },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now, expires: 60 } // 60 másodperc után az adatbázis automatikusan törli
 });
 
 const Key = mongoose.model('Key', KeySchema);
@@ -116,7 +114,17 @@ app.delete('/api/shares/:id', isOwner, async (req, res) => {
 app.post('/api/public/code', async (req, res) => {
   const { token, password } = req.body;
   const share = await Share.findOne({ shareToken: token }).populate('keyId');
-  if (!share || !share.keyId) return res.status(404).json({ error: 'Nincs ilyen megosztás' });
+  
+  if (!share || !share.keyId) return res.status(404).json({ error: 'Nincs ilyen megosztás vagy lejárt' });
+
+  // Manuális ellenőrzés a biztos 1 perces lejárathoz
+  const now = new Date();
+  const diffInSeconds = (now - share.createdAt) / 1000;
+  if (diffInSeconds > 60) {
+    await Share.findByIdAndDelete(share._id);
+    return res.status(410).json({ error: 'A megosztási link 1 perc után lejárt' });
+  }
+
   if (!bcrypt.compareSync(password, share.passwordHash)) return res.status(401).json({ error: 'Hibás jelszó' });
 
   res.json({
@@ -126,7 +134,6 @@ app.post('/api/public/code', async (req, res) => {
   });
 });
 
-// --- MINDEN EGYÉB KÉRÉSRE AZ INDEX.HTML-T ADJUK ---
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
