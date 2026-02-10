@@ -8,7 +8,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.set('trust proxy', true); // Render miatt kötelező!
+app.set('trust proxy', true); // Render proxy támogatás
 app.use(express.json());
 app.use(cors());
 
@@ -106,7 +106,6 @@ app.delete('/api/shares/:id', isOwner, async (req, res) => {
 
 app.post('/api/public/code', async (req, res) => {
   const { token, label, password } = req.body;
-  // Render-specifikus IP lekérés:
   const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip;
 
   const share = await Share.findOne({ shareToken: token }).populate('keyId');
@@ -121,24 +120,24 @@ app.post('/api/public/code', async (req, res) => {
   }
 
   const now = new Date();
-  const ONE_MINUTE = 60 * 1000;
   if (!share.sessionStartedAt || (now - share.sessionStartedAt) >= 86400000) {
     share.sessionStartedAt = now;
     await share.save();
   }
 
   const elapsed = now - share.sessionStartedAt;
-  if (elapsed > ONE_MINUTE) return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott.' });
+  if (elapsed > 60000) return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott.' });
 
   res.json({
     name: share.keyId.name,
     code: otplib.authenticator.generate(share.keyId.secret),
     remaining: otplib.authenticator.timeRemaining(),
-    sessionExpiresIn: Math.max(0, Math.floor((ONE_MINUTE - elapsed) / 1000))
+    sessionExpiresIn: Math.max(0, Math.floor((60000 - elapsed) / 1000))
   });
 });
 
-app.get(['/', '/admin'], (req, res) => {
+// FONTOS: Ez biztosítja, hogy bármilyen útvonalon (pl. /admin) betöltődjön az oldal
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
