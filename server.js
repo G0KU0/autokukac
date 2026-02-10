@@ -1,5 +1,5 @@
 /**
- * SZERVER OLDAL (Backend) - Frissítve 1 perces lejárati idővel
+ * SZERVER OLDAL (Backend) - Napi 1 perces hozzáférési korláttal
  */
 require('dotenv').config();
 const express = require('express');
@@ -37,7 +37,8 @@ const ShareSchema = new mongoose.Schema({
   label: { type: String, required: true },
   passwordHash: { type: String, required: true },
   shareToken: { type: String, required: true, unique: true },
-  createdAt: { type: Date, default: Date.now, expires: 60 } // 60 másodperc után az adatbázis automatikusan törli
+  sessionStartedAt: { type: Date, default: null }, // Az 1 perces ablak kezdete
+  createdAt: { type: Date, default: Date.now }
 });
 
 const Key = mongoose.model('Key', KeySchema);
@@ -111,26 +112,38 @@ app.delete('/api/shares/:id', isOwner, async (req, res) => {
   res.json({ success: true });
 });
 
+// Ez a végpont kezeli a napi 1 perces korlátozást
 app.post('/api/public/code', async (req, res) => {
   const { token, password } = req.body;
   const share = await Share.findOne({ shareToken: token }).populate('keyId');
   
-  if (!share || !share.keyId) return res.status(404).json({ error: 'Nincs ilyen megosztás vagy lejárt' });
+  if (!share || !share.keyId) return res.status(404).json({ error: 'Nincs ilyen megosztás' });
+  if (!bcrypt.compareSync(password, share.passwordHash)) return res.status(401).json({ error: 'Hibás jelszó' });
 
-  // Manuális ellenőrzés a biztos 1 perces lejárathoz
   const now = new Date();
-  const diffInSeconds = (now - share.createdAt) / 1000;
-  if (diffInSeconds > 60) {
-    await Share.findByIdAndDelete(share._id);
-    return res.status(410).json({ error: 'A megosztási link 1 perc után lejárt' });
+  const ONE_MINUTE = 60 * 1000;
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+  // 1. Munkamenet indítása vagy resetelése 24 óra után
+  if (!share.sessionStartedAt || (now - share.sessionStartedAt) >= TWENTY_FOUR_HOURS) {
+    share.sessionStartedAt = now;
+    await share.save();
   }
 
-  if (!bcrypt.compareSync(password, share.passwordHash)) return res.status(401).json({ error: 'Hibás jelszó' });
+  // 2. Ellenőrzés: benne van-e még az 1 perces ablakban?
+  const elapsed = now - share.sessionStartedAt;
+  if (elapsed > ONE_MINUTE) {
+    const nextAccess = new Date(share.sessionStartedAt.getTime() + TWENTY_FOUR_HOURS);
+    return res.status(403).json({ 
+      error: `A napi 1 perces kereted lejárt. Újra elérhető: ${nextAccess.toLocaleString('hu-HU')}` 
+    });
+  }
 
   res.json({
     name: share.keyId.name,
     code: otplib.authenticator.generate(share.keyId.secret),
-    remaining: otplib.authenticator.timeRemaining()
+    remaining: otplib.authenticator.timeRemaining(),
+    sessionExpiresIn: Math.max(0, Math.floor((ONE_MINUTE - elapsed) / 1000))
   });
 });
 
