@@ -1,6 +1,3 @@
-/**
- * SZERVER OLDAL - IP korlátozás, Szerkeszthető jelszavak, Név alapú belépés
- */
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -11,7 +8,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.set('trust proxy', true); // Fontos az IP címek pontos lekéréséhez (pl. Heroku/Cloudflare alatt)
+app.set('trust proxy', true); 
 app.use(express.json());
 app.use(cors());
 
@@ -33,9 +30,9 @@ const KeySchema = new mongoose.Schema({
 const ShareSchema = new mongoose.Schema({
   keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key', required: true },
   label: { type: String, required: true },     // Ezt kell megadnia a vendégnek névként
-  password: { type: String, required: true },  // Admin látja és módosíthatja
+  password: { type: String, required: true },  
   shareToken: { type: String, required: true, unique: true },
-  allowedIp: { type: String, default: null },  // Az első IP, ami rögzül
+  allowedIp: { type: String, default: null },  
   sessionStartedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
@@ -43,7 +40,7 @@ const ShareSchema = new mongoose.Schema({
 const Key = mongoose.model('Key', KeySchema);
 const Share = mongoose.model('Share', ShareSchema);
 
-// --- HITELLESÍTÉS ---
+// --- HITELLESÍTÉS MIDDLEWARE ---
 const isOwner = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.status(401).json({ error: 'Nincs bejelentkezve' });
@@ -68,15 +65,14 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ error: 'Hibás mesterjelszó!' });
 });
 
-// Kulcsok kezelése
+// Admin API-k
 app.get('/api/keys', isOwner, async (req, res) => {
   const keys = await Key.find();
-  const result = keys.map(k => ({
+  res.json(keys.map(k => ({
     id: k._id, name: k.name,
     code: otplib.authenticator.generate(k.secret),
     remaining: otplib.authenticator.timeRemaining()
-  }));
-  res.json(result);
+  })));
 });
 
 app.post('/api/keys', isOwner, async (req, res) => {
@@ -92,19 +88,18 @@ app.delete('/api/keys/:id', isOwner, async (req, res) => {
   res.json({ success: true });
 });
 
-// Megosztások kezelése
+app.get('/api/shares', isOwner, async (req, res) => {
+  const shares = await Share.find().populate('keyId', 'name');
+  res.json(shares);
+});
+
 app.post('/api/shares', isOwner, async (req, res) => {
-  const { keyId, label, customPassword } = req.body;
-  const password = customPassword || crypto.randomBytes(4).toString('hex');
+  const { keyId, label } = req.body;
+  const password = crypto.randomBytes(4).toString('hex');
   const shareToken = crypto.randomBytes(16).toString('hex');
   const share = new Share({ keyId, label, password, shareToken });
   await share.save();
   res.json(share);
-});
-
-app.get('/api/shares', isOwner, async (req, res) => {
-  const shares = await Share.find().populate('keyId', 'name');
-  res.json(shares);
 });
 
 app.patch('/api/shares/:id', isOwner, async (req, res) => {
@@ -118,13 +113,12 @@ app.delete('/api/shares/:id', isOwner, async (req, res) => {
   res.json({ success: true });
 });
 
-// --- VENDÉG KÓD LEKÉRÉS (IP ÉS NÉV ELLENŐRZÉSSEL) ---
+// VENDÉG API (Név + Jelszó + IP + 1 perc limit)
 app.post('/api/public/code', async (req, res) => {
   const { token, label, password } = req.body;
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
   const share = await Share.findOne({ shareToken: token }).populate('keyId');
-  
   if (!share) return res.status(404).json({ error: 'Érvénytelen link' });
 
   // 1. Név és Jelszó ellenőrzése
@@ -132,15 +126,15 @@ app.post('/api/public/code', async (req, res) => {
     return res.status(401).json({ error: 'Hibás név vagy jelszó' });
   }
 
-  // 2. IP Cím ellenőrzése / Rögzítése
+  // 2. IP Cím ellenőrzése
   if (!share.allowedIp) {
-    share.allowedIp = clientIp; // Első használatkor rögzítjük
+    share.allowedIp = clientIp;
     await share.save();
   } else if (share.allowedIp !== clientIp) {
-    return res.status(403).json({ error: 'Ez a link le van védve egy másik IP címre!' });
+    return res.status(403).json({ error: 'Ez a hozzáférés egy másik eszközhöz van kötve!' });
   }
 
-  // 3. Napi 1 perces korlát
+  // 3. Időkorlát (1 perc / 24 óra)
   const now = new Date();
   const ONE_MINUTE = 60 * 1000;
   const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
@@ -152,7 +146,7 @@ app.post('/api/public/code', async (req, res) => {
 
   const elapsed = now - share.sessionStartedAt;
   if (elapsed > ONE_MINUTE) {
-    return res.status(403).json({ error: 'A mai 1 perces kereted elfogyott.' });
+    return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott.' });
   }
 
   res.json({
@@ -163,10 +157,11 @@ app.post('/api/public/code', async (req, res) => {
   });
 });
 
-app.get('*', (req, res) => {
+// Kiszolgáljuk az admin és a főoldalt is ugyanazzal az index.html-lel
+app.get(['/', '/admin'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 mongoose.connect(MONGO_URI).then(() => {
-  app.listen(PORT, () => console.log(`Szerver fut a ${PORT} porton.`));
+  app.listen(PORT, () => console.log(`Szerver fut: http://localhost:${PORT}`));
 });
