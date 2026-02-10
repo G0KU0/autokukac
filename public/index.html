@@ -11,7 +11,7 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #0c0c0e; color: #f4f4f5; }
+        body { font-family: 'Inter', sans-serif; background-color: #0c0c0e; color: #f4f4f5; margin: 0; padding: 0; }
         .mono { font-family: monospace; }
     </style>
 </head>
@@ -33,34 +33,47 @@
             const [guestData, setGuestData] = useState(null);
             const [error, setError] = useState('');
 
+            // --- RENDSZER INICIALIZÁLÁSA ÉS ÚTVONAL KEZELÉS ---
             useEffect(() => {
-                const path = window.location.pathname;
-                const params = new URLSearchParams(window.location.search);
-                const shareToken = params.get('share');
+                const initView = () => {
+                    const path = window.location.pathname;
+                    const params = new URLSearchParams(window.location.search);
+                    const shareToken = params.get('share');
 
-                if (path.startsWith('/admin')) {
-                    setView(token ? 'admin_dashboard' : 'admin_login');
-                } else if (shareToken) {
-                    setView('guest_login');
-                } else {
-                    setView('no_access');
-                }
+                    console.log("Current Path:", path);
+                    console.log("Has Token:", !!token);
+
+                    if (path.includes('/admin')) {
+                        setView(token ? 'admin_dashboard' : 'admin_login');
+                    } else if (shareToken) {
+                        setView('guest_login');
+                    } else {
+                        setView('no_access');
+                    }
+                };
+                initView();
             }, [token]);
 
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [view, keys, shares, guestData]);
+            useEffect(() => { 
+                if (window.lucide) window.lucide.createIcons(); 
+            }, [view, keys, shares, guestData]);
 
+            // --- ADMIN FUNKCIÓK ---
             const refreshAdmin = async () => {
-                if (!token) return;
+                if (!token || view !== 'admin_dashboard') return;
                 try {
                     const h = { 'Authorization': token };
                     const [kRes, sRes] = await Promise.all([
                         fetch(`${API_BASE}/keys`, { headers: h }),
                         fetch(`${API_BASE}/shares`, { headers: h })
                     ]);
-                    if (kRes.ok) setKeys(await kRes.json());
-                    if (sRes.ok) setShares(await sRes.json());
-                    if (kRes.status === 401) handleLogout();
-                } catch (e) { console.error("Fetch error"); }
+                    if (kRes.ok) {
+                        setKeys(await kRes.json());
+                        setShares(await sRes.json());
+                    } else if (kRes.status === 401) {
+                        handleLogout();
+                    }
+                } catch (e) { console.error("API Error:", e); }
             };
 
             useEffect(() => {
@@ -72,17 +85,18 @@
             }, [view]);
 
             const handleAdminLogin = async () => {
-                const res = await fetch(`${API_BASE}/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPass })
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    localStorage.setItem('owner_token', data.token);
-                    setToken(data.token);
-                    setView('admin_dashboard');
-                } else { alert(data.error); }
+                try {
+                    const res = await fetch(`${API_BASE}/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password: adminPass })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        localStorage.setItem('owner_token', data.token);
+                        setToken(data.token);
+                    } else { alert(data.error); }
+                } catch (e) { alert("Szerver hiba a belépéskor."); }
             };
 
             const handleLogout = () => {
@@ -100,25 +114,32 @@
                 refreshAdmin();
             };
 
+            // --- VENDÉG FUNKCIÓK ---
             const handleGuestLogin = async () => {
                 const params = new URLSearchParams(window.location.search);
-                const res = await fetch(`${API_BASE}/public/code`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: params.get('share'), label: guestName, password: guestPass })
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    setGuestData(data);
-                    setError('');
-                    setTimeout(handleGuestLogin, 5000);
-                } else { setError(data.error); }
+                try {
+                    const res = await fetch(`${API_BASE}/public/code`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: params.get('share'), label: guestName, password: guestPass })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        setGuestData(data);
+                        setError('');
+                        setTimeout(handleGuestLogin, 5000);
+                    } else { setError(data.error); }
+                } catch (e) { setError("Szerver hiba."); }
             };
 
             const Icon = ({ name, size = 20 }) => <i data-lucide={name} style={{ width: size, height: size }}></i>;
 
+            // --- NÉZETEK ---
+
             if (view === 'loading') return (
-                <div className="min-h-screen flex items-center justify-center text-zinc-500 animate-pulse">Betöltés...</div>
+                <div className="min-h-screen flex items-center justify-center bg-[#0c0c0e]">
+                    <div className="text-blue-500 font-bold animate-pulse">Rendszer betöltése...</div>
+                </div>
             );
 
             if (view === 'guest_login') return (
@@ -127,16 +148,16 @@
                         {!guestData ? (
                             <>
                                 <h1 className="text-2xl font-black mb-6">Bejelentkezés</h1>
-                                {error && <div className="bg-red-500/10 text-red-500 p-3 rounded-xl text-xs mb-4">{error}</div>}
-                                <input type="text" placeholder="Név" className="w-full bg-zinc-800 p-4 rounded-xl mb-3 outline-none" value={guestName} onChange={e => setGuestName(e.target.value)} />
-                                <input type="password" placeholder="Jelszó" className="w-full bg-zinc-800 p-4 rounded-xl mb-6 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} />
+                                {error && <div className="bg-red-500/10 text-red-500 p-3 rounded-xl text-xs mb-4 font-bold">{error}</div>}
+                                <input type="text" placeholder="Név" className="w-full bg-zinc-800 p-4 rounded-xl mb-3 outline-none focus:ring-1 focus:ring-blue-600" value={guestName} onChange={e => setGuestName(e.target.value)} />
+                                <input type="password" placeholder="Jelszó" className="w-full bg-zinc-800 p-4 rounded-xl mb-6 outline-none focus:ring-1 focus:ring-blue-600" value={guestPass} onChange={e => setGuestPass(e.target.value)} />
                                 <button onClick={handleGuestLogin} className="w-full bg-white text-black font-black py-4 rounded-xl">BELÉPÉS</button>
                             </>
                         ) : (
                             <div>
                                 <div className="text-blue-500 text-xs font-black uppercase mb-2">{guestData.name}</div>
                                 <div className="text-6xl font-black mono tracking-tighter mb-8">{guestData.code}</div>
-                                <div className="text-red-500 text-[10px] font-bold uppercase tracking-widest">Napi keret: {guestData.sessionExpiresIn} mp</div>
+                                <div className="bg-red-500/10 text-red-500 p-2 rounded-lg text-[10px] font-bold uppercase">Keret: {guestData.sessionExpiresIn} mp</div>
                             </div>
                         )}
                     </div>
@@ -161,10 +182,10 @@
                     </header>
                     <div className="grid lg:grid-cols-2 gap-12">
                         <section>
-                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2"><Icon name="key" /> Kulcsok</h2>
+                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2 text-zinc-400"><Icon name="key" /> Saját Kulcsok</h2>
                             <div className="space-y-4">
-                                {(keys || []).map(k => (
-                                    <div key={k.id} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex justify-between items-center">
+                                {keys.map(k => (
+                                    <div key={k.id} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 flex justify-between items-center group">
                                         <div>
                                             <div className="text-[10px] text-blue-500 font-black uppercase">{k.name}</div>
                                             <div className="text-3xl font-black mono">{k.code}</div>
@@ -173,24 +194,24 @@
                                             const label = prompt('Kinek a részére?');
                                             if(label) await fetch(`${API_BASE}/shares`, {method:'POST', headers:{'Authorization':token, 'Content-Type':'application/json'}, body:JSON.stringify({keyId:k.id, label})});
                                             refreshAdmin();
-                                        }} className="bg-zinc-800 p-4 rounded-2xl hover:bg-blue-600"><Icon name="share-2" /></button>
+                                        }} className="bg-zinc-800 p-4 rounded-2xl hover:bg-blue-600 transition-colors"><Icon name="share-2" /></button>
                                     </div>
                                 ))}
                             </div>
                         </section>
                         <section>
-                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2"><Icon name="users" /> Megosztások (IP)</h2>
+                            <h2 className="text-lg font-bold mb-6 flex items-center gap-2 text-zinc-400"><Icon name="users" /> Megosztások és IP védelem</h2>
                             <div className="space-y-4">
-                                {(shares || []).map(s => (
+                                {shares.map(s => (
                                     <div key={s._id} className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
                                         <div className="flex justify-between mb-4">
                                             <span className="font-bold text-blue-400">{s.label}</span>
-                                            <button onClick={async () => {if(confirm('Törlöd?')) {await fetch(`${API_BASE}/shares/${s._id}`, {method:'DELETE', headers:{'Authorization':token}}); refreshAdmin();}}} className="text-zinc-600"><Icon name="trash" size={16} /></button>
+                                            <button onClick={async () => {if(confirm('Törlöd?')) {await fetch(`${API_BASE}/shares/${s._id}`, {method:'DELETE', headers:{'Authorization':token}}); refreshAdmin();}}} className="text-zinc-600 hover:text-red-500"><Icon name="trash" size={16} /></button>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <label className="text-[10px] uppercase text-zinc-500 font-bold">Jelszó</label>
-                                                <input type="text" className="w-full bg-zinc-800 text-xs p-2 rounded mt-1 border border-zinc-700" value={s.password} onChange={(e) => updateShare(s._id, {password: e.target.value})} />
+                                                <input type="text" className="w-full bg-zinc-800 text-xs p-2 rounded mt-1 border border-zinc-700 outline-none focus:border-blue-500" value={s.password} onChange={(e) => updateShare(s._id, {password: e.target.value})} />
                                             </div>
                                             <div>
                                                 <label className="text-[10px] uppercase text-zinc-500 font-bold">Rögzített IP</label>
@@ -212,7 +233,13 @@
             );
 
             return (
-                <div className="min-h-screen flex items-center justify-center text-zinc-700">Nincs hozzáférés.</div>
+                <div className="min-h-screen flex items-center justify-center p-6 text-center">
+                    <div>
+                        <h1 className="text-xl font-bold text-zinc-500 mb-2">Nincs hozzáférés</h1>
+                        <p className="text-zinc-600 text-sm">Használd a kapott megosztási linket.</p>
+                        <a href="/admin" className="mt-4 inline-block text-blue-600 text-xs font-bold">ADMIN BELÉPÉS</a>
+                    </div>
+                </div>
             );
         };
 
