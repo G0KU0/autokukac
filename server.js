@@ -8,11 +8,10 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.set('trust proxy', true); 
+app.set('trust proxy', true); // Render miatt kötelező!
 app.use(express.json());
 app.use(cors());
 
-// --- KONFIGURÁCIÓ ---
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-123';
@@ -20,7 +19,6 @@ const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- ADATBÁZIS MODELLEK ---
 const KeySchema = new mongoose.Schema({
   name: { type: String, required: true },
   secret: { type: String, required: true },
@@ -29,10 +27,10 @@ const KeySchema = new mongoose.Schema({
 
 const ShareSchema = new mongoose.Schema({
   keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key', required: true },
-  label: { type: String, required: true },     // Ezt kell megadnia a vendégnek névként
-  password: { type: String, required: true },  
+  label: { type: String, required: true },
+  password: { type: String, required: true },
   shareToken: { type: String, required: true, unique: true },
-  allowedIp: { type: String, default: null },  
+  allowedIp: { type: String, default: null },
   sessionStartedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
@@ -40,7 +38,6 @@ const ShareSchema = new mongoose.Schema({
 const Key = mongoose.model('Key', KeySchema);
 const Share = mongoose.model('Share', ShareSchema);
 
-// --- HITELLESÍTÉS MIDDLEWARE ---
 const isOwner = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.status(401).json({ error: 'Nincs bejelentkezve' });
@@ -48,14 +45,9 @@ const isOwner = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
-  } catch (e) {
-    res.status(401).json({ error: 'Érvénytelen munkamenet' });
-  }
+  } catch (e) { res.status(401).json({ error: 'Érvénytelen munkamenet' }); }
 };
 
-// --- API ÚTVONALAK ---
-
-// Admin Login
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
   if (password === MASTER_PASSWORD) {
@@ -65,7 +57,6 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ error: 'Hibás mesterjelszó!' });
 });
 
-// Admin API-k
 app.get('/api/keys', isOwner, async (req, res) => {
   const keys = await Key.find();
   res.json(keys.map(k => ({
@@ -113,41 +104,31 @@ app.delete('/api/shares/:id', isOwner, async (req, res) => {
   res.json({ success: true });
 });
 
-// VENDÉG API (Név + Jelszó + IP + 1 perc limit)
 app.post('/api/public/code', async (req, res) => {
   const { token, label, password } = req.body;
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  // Render-specifikus IP lekérés:
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip;
 
   const share = await Share.findOne({ shareToken: token }).populate('keyId');
   if (!share) return res.status(404).json({ error: 'Érvénytelen link' });
+  if (share.label !== label || share.password !== password) return res.status(401).json({ error: 'Hibás név vagy jelszó' });
 
-  // 1. Név és Jelszó ellenőrzése
-  if (share.label !== label || share.password !== password) {
-    return res.status(401).json({ error: 'Hibás név vagy jelszó' });
-  }
-
-  // 2. IP Cím ellenőrzése
   if (!share.allowedIp) {
     share.allowedIp = clientIp;
     await share.save();
   } else if (share.allowedIp !== clientIp) {
-    return res.status(403).json({ error: 'Ez a hozzáférés egy másik eszközhöz van kötve!' });
+    return res.status(403).json({ error: 'Ez a hozzáférés más eszközhöz van kötve!' });
   }
 
-  // 3. Időkorlát (1 perc / 24 óra)
   const now = new Date();
   const ONE_MINUTE = 60 * 1000;
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-
-  if (!share.sessionStartedAt || (now - share.sessionStartedAt) >= TWENTY_FOUR_HOURS) {
+  if (!share.sessionStartedAt || (now - share.sessionStartedAt) >= 86400000) {
     share.sessionStartedAt = now;
     await share.save();
   }
 
   const elapsed = now - share.sessionStartedAt;
-  if (elapsed > ONE_MINUTE) {
-    return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott.' });
-  }
+  if (elapsed > ONE_MINUTE) return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott.' });
 
   res.json({
     name: share.keyId.name,
@@ -157,11 +138,10 @@ app.post('/api/public/code', async (req, res) => {
   });
 });
 
-// Kiszolgáljuk az admin és a főoldalt is ugyanazzal az index.html-lel
 app.get(['/', '/admin'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 mongoose.connect(MONGO_URI).then(() => {
-  app.listen(PORT, () => console.log(`Szerver fut: http://localhost:${PORT}`));
+  app.listen(PORT, () => console.log(`Szerver fut a ${PORT} porton.`));
 });
