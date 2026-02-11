@@ -1,6 +1,6 @@
 {
-  "name": "auth-pro-persistent",
-  "version": "1.7.0",
+  "name": "auth-szaby-persistent",
+  "version": "1.8.0",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
   "dependencies": {
