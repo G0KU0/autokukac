@@ -8,45 +8,45 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.set('trust proxy', true); 
+app.set('trust proxy', true);
 app.use(express.json());
 app.use(cors());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
-const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-xyz';
+const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-123';
 const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ADATBÁZIS
+// MODELLEK
 const Key = mongoose.model('Key', new mongoose.Schema({
     name: String, secret: String, createdAt: { type: Date, default: Date.now }
 }));
 
 const Share = mongoose.model('Share', new mongoose.Schema({
     keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key' },
-    label: String, password: String, shareToken: String,
+    email: String, // Név helyett Email
+    password: String,
+    shareToken: String,
     allowedIp: { type: String, default: null },
     sessionStartedAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now }
 }));
 
-// AUTH MIDDLEWARE
 const auth = (req, res, next) => {
     try {
         const decoded = jwt.verify(req.headers.authorization, JWT_SECRET);
-        req.user = decoded;
         next();
-    } catch (e) { res.status(401).json({ error: 'Bejelentkezés szükséges' }); }
+    } catch (e) { res.status(401).json({ error: 'Admin auth szükséges' }); }
 };
 
-// API
+// ADMIN API
 app.post('/api/login', (req, res) => {
     if (req.body.password === MASTER_PASSWORD) {
         return res.json({ token: jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' }) });
     }
-    res.status(401).json({ error: 'Hibás admin jelszó!' });
+    res.status(401).json({ error: 'Hibás jelszó!' });
 });
 
 app.get('/api/keys', auth, async (req, res) => {
@@ -76,7 +76,7 @@ app.get('/api/shares', auth, async (req, res) => {
 
 app.post('/api/shares', auth, async (req, res) => {
     const share = new Share({
-        keyId: req.body.keyId, label: req.body.label,
+        keyId: req.body.keyId, email: req.body.email,
         password: crypto.randomBytes(3).toString('hex'),
         shareToken: crypto.randomBytes(12).toString('hex')
     });
@@ -93,27 +93,38 @@ app.delete('/api/shares/:id', auth, async (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/public/code', async (req, res) => {
-    const { token, label, password } = req.body;
+// VENDÉG API - KÓD LEKÉRÉSE (TIMER INDÍTÁSSAL)
+app.post('/api/public/get-code', async (req, res) => {
+    const { token, email, password, startTimer } = req.body;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip;
 
     const share = await Share.findOne({ shareToken: token }).populate('keyId');
-    if (!share || share.label !== label || share.password !== password) {
+    if (!share || share.email !== email || share.password !== password) {
         return res.status(401).json({ error: 'Hibás adatok!' });
     }
 
+    // IP Ellenőrzés
     if (!share.allowedIp) { share.allowedIp = clientIp; await share.save(); }
-    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'IP tiltás: Ez a kulcs egy másik eszközhöz van kötve!' });
+    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Ez a kulcs egy másik eszközhöz van kötve!' });
 
     const now = new Date();
-    if (!share.sessionStartedAt || (now - share.sessionStartedAt) > 86400000) {
-        share.sessionStartedAt = now; await share.save();
-    }
-    const elapsed = now - share.sessionStartedAt;
-    if (elapsed > 60000) return res.status(403).json({ error: 'Mára lejárt az 1 perces kereted!' });
+    const isNewDay = !share.sessionStartedAt || (now - share.sessionStartedAt) > 86400000;
 
+    // Ha még nem indult el a timer ma, és a felhasználó rákattintott az OK-ra
+    if (isNewDay && startTimer) {
+        share.sessionStartedAt = now;
+        await share.save();
+    } else if (isNewDay && !startTimer) {
+        // Csak visszaigazoljuk, hogy az adatok jók, de kódot nem küldünk
+        return res.json({ ready: true });
+    }
+
+    const elapsed = now - share.sessionStartedAt;
+    if (elapsed > 60000) return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott! Gyere vissza 24 óra múlva.' });
+
+    // Ha elindult a timer, küldjük a kódot
     res.json({
-        name: share.keyId?.name || "Ismeretlen",
+        name: share.keyId.name,
         code: otplib.authenticator.generate(share.keyId.secret),
         remaining: otplib.authenticator.timeRemaining(),
         expiresIn: Math.max(0, Math.floor((60000 - elapsed) / 1000))
@@ -122,7 +133,4 @@ app.post('/api/public/code', async (req, res) => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-mongoose.connect(MONGO_URI).then(() => {
-    console.log("DB Connected");
-    app.listen(PORT, () => console.log("Server running"));
-});
+mongoose.connect(MONGO_URI).then(() => app.listen(PORT));
