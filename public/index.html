@@ -9,16 +9,20 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
         body { background: #000; color: #fff; font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; }
         .glass { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 28px; }
-        .btn-white { background: #fff; color: #000; font-weight: 900; border-radius: 14px; }
-        input { background: #111 !important; border: 1px solid #222 !important; color: white !important; font-size: 14px !important; }
+        .btn-white { background: #fff; color: #000; font-weight: 800; border-radius: 12px; }
+        input { background: #111 !important; border: 1px solid #222 !important; color: white !important; font-size: 16px !important; }
         .mono { font-family: monospace; letter-spacing: 2px; }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div style="padding: 50px; text-align: center; color: #444;">
+            Rendszer inicializálása... Ha a képernyő fekete marad, ellenőrizd az internetkapcsolatot.
+        </div>
+    </div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
@@ -33,21 +37,17 @@
             const [guestData, setGuestData] = useState(null);
             const [showModal, setShowModal] = useState(false);
             const [error, setError] = useState('');
-            const [renderError, setRenderError] = useState(null);
+            const [fatalError, setFatalError] = useState(null);
 
-            // Globális hibafigyelő a komponensen belül
-            useEffect(() => {
-                window.onerror = (msg) => setRenderError(msg);
-            }, []);
-
+            // Útvonal kezelő
             useEffect(() => {
                 try {
                     const path = window.location.pathname;
                     const share = new URLSearchParams(window.location.search).get('share');
-                    if (path === '/admin') setView(token ? 'admin' : 'login');
+                    if (path.includes('/admin')) setView(token ? 'admin' : 'login');
                     else if (share) setView('guest');
                     else setView('welcome');
-                } catch (e) { setRenderError(e.message); }
+                } catch (e) { setFatalError(e.message); }
             }, [token]);
 
             const api = async (url, method = 'GET', body = null) => {
@@ -56,7 +56,7 @@
                     body: body ? JSON.stringify(body) : null
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Hiba');
+                if (!res.ok) throw new Error(data.error || 'Hiba történt');
                 return data;
             };
 
@@ -64,35 +64,35 @@
                 if (view !== 'admin') return;
                 try {
                     const [k, s] = await Promise.all([api('/keys'), api('/shares')]);
-                    setKeys(Array.isArray(k) ? k : []); 
+                    setKeys(Array.isArray(k) ? k : []);
                     setShares(Array.isArray(s) ? s : []);
-                } catch (e) { console.error(e); }
+                } catch (e) { if(e.message.includes('belépve')) setToken(null); }
             };
 
-            useEffect(() => { if (view === 'admin') { loadAdmin(); const i = setInterval(loadAdmin, 10000); return () => clearInterval(i); } }, [view]);
+            useEffect(() => {
+                if (view === 'admin') { loadAdmin(); const i = setInterval(loadAdmin, 10000); return () => clearInterval(i); }
+            }, [view, token]);
 
-            if (renderError) return (
-                <div className="p-10 text-red-500 bg-black h-screen">
-                    <h1 className="text-xl font-bold mb-4">Rendszerhiba történt!</h1>
-                    <p className="text-sm mono">{renderError}</p>
-                    <button onClick={() => window.location.reload()} className="mt-4 bg-white text-black p-2 rounded">Újratöltés</button>
-                </div>
-            );
+            if (fatalError) return <div className="p-10 text-red-500 bg-black h-screen">Hiba: {fatalError}</div>;
+            if (view === 'loading') return <div className="h-screen flex items-center justify-center text-zinc-700 font-bold">BETÖLTÉS...</div>;
 
-            if (view === 'loading') return <div className="h-screen flex items-center justify-center text-zinc-700">Betöltés...</div>;
-
+            // KEZDŐOLDAL
             if (view === 'welcome') return (
                 <div className="flex h-screen flex-col items-center justify-center p-6 text-center">
-                    <h1 className="text-5xl font-black mb-4 tracking-tighter">By Szaby</h1>
-                    <p className="max-w-md text-zinc-500 mb-8">Prémium digitális fiókok biztonságos kezelése.</p>
-                    <a href="/admin" className="text-[10px] font-bold border border-zinc-800 px-6 py-2 rounded-full uppercase text-zinc-600">Admin Belépés</a>
+                    <h1 className="text-5xl font-black mb-4 tracking-tighter italic">By Szaby</h1>
+                    <p className="max-w-md text-zinc-500 mb-8 leading-relaxed text-sm">
+                        Ez a rendszer Szaby által lett kifejlesztve prémium digitális fiókok (ChatGPT, Streaming stb.) biztonságos értékesítésére. 
+                        A vásárlók itt érhetik el a 2FA kódokat.
+                    </p>
+                    <a href="/admin" className="text-[10px] font-bold border border-zinc-800 px-6 py-2 rounded-full uppercase text-zinc-600 hover:text-white transition-all">Admin Belépés</a>
                 </div>
             );
 
+            // ADMIN LOGIN
             if (view === 'login') return (
                 <div className="flex h-screen items-center justify-center p-6 text-center">
                     <div className="glass w-full max-w-sm p-10">
-                        <h1 className="mb-8 text-xl font-black uppercase">Admin Login</h1>
+                        <h1 className="mb-8 text-xl font-black italic">ADMIN PANEL</h1>
                         <form onSubmit={async (e) => {
                             e.preventDefault();
                             try {
@@ -107,12 +107,13 @@
                 </div>
             );
 
+            // ADMIN DASHBOARD
             if (view === 'admin') return (
                 <div className="mx-auto max-w-6xl p-6 md:p-12">
-                    <header className="flex justify-between items-center mb-12 border-b border-zinc-900 pb-6">
+                    <div className="flex justify-between items-center mb-12 border-b border-zinc-900 pb-6">
                         <h1 className="text-xl font-black italic">AUTH PRO <span className="text-zinc-700 font-normal">By Szaby</span></h1>
-                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500 font-bold text-xs uppercase">Kilépés</button>
-                    </header>
+                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-600 font-bold text-xs">Kilépés</button>
+                    </div>
                     <div className="grid gap-10 lg:grid-cols-2">
                         <section>
                             <div className="mb-6 flex items-center justify-between text-zinc-500">
@@ -120,53 +121,51 @@
                                 <button onClick={async () => {
                                     const n = prompt('Név:'); const s = prompt('Secret:');
                                     if(n && s) { await api('/keys', 'POST', {name:n, secret:s}); loadAdmin(); }
-                                }} className="text-[10px] bg-white text-black px-3 py-1 rounded-full font-black">+ ÚJ</button>
+                                }} className="text-[10px] bg-white text-black px-4 py-2 rounded-full font-black tracking-tighter">+ ÚJ</button>
                             </div>
                             <div className="space-y-4">
                                 {keys.map(k => (
-                                    <div key={k.id} className="glass p-6 flex justify-between items-center">
-                                        <div><div className="text-[10px] text-zinc-600 font-bold uppercase mb-1">{k.name}</div><div className="text-3xl font-black mono">{k.code}</div></div>
-                                        <div className="flex gap-2 text-xs font-bold">
+                                    <div key={k.id} className="glass p-6 flex justify-between items-center shadow-xl">
+                                        <div><div className="text-[10px] text-zinc-600 font-bold uppercase mb-1">{k.name}</div><div className="text-3xl font-black mono tracking-tighter text-white">{k.code}</div></div>
+                                        <div className="flex gap-2">
                                             <button onClick={async () => {
                                                 const email = prompt('Vevő email:');
                                                 if(email) { await api('/shares', 'POST', {keyId: k.id, email}); loadAdmin(); }
-                                            }} className="bg-zinc-900 px-4 py-2 rounded-xl">Megosztás</button>
-                                            <button onClick={async () => { if(confirm('Törlöd?')) { await api('/keys/'+k.id, 'DELETE'); loadAdmin(); } }} className="text-red-500 p-2">×</button>
+                                            }} className="bg-zinc-900 px-4 py-2 rounded-xl text-[10px] font-bold">Megosztás</button>
+                                            <button onClick={async () => { if(confirm('Törlöd?')) { await api('/keys/'+k.id, 'DELETE'); loadAdmin(); } }} className="text-red-500 p-2 font-bold text-xl">×</button>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </section>
                         <section>
-                            <h2 className="mb-6 text-xs font-bold uppercase text-zinc-500">Aktív Megosztások (IP Lock)</h2>
+                            <h2 className="mb-6 text-xs font-bold uppercase text-zinc-500">Megosztások (IP)</h2>
                             <div className="space-y-4">
                                 {shares.map(s => {
                                     const nextUse = s.sessionStartedAt ? new Date(new Date(s.sessionStartedAt).getTime() + 86400000) : null;
-                                    const canUseAgain = !nextUse || new Date() > nextUse;
+                                    const canUse = !nextUse || new Date() > nextUse;
                                     return (
                                         <div key={s._id} className="glass p-6">
-                                            <div className="mb-4 flex justify-between items-center">
-                                                <span className="font-bold text-white text-sm truncate w-40">{s.email}</span>
+                                            <div className="mb-4 flex justify-between items-center border-b border-white/5 pb-2">
+                                                <span className="font-bold text-white text-sm">{s.email}</span>
                                                 <button onClick={async () => { if(confirm('Törlöd?')) { await api('/shares/'+s._id, 'DELETE'); loadAdmin(); } }} className="text-zinc-700 text-xs">Törlés</button>
                                             </div>
                                             <div className="grid grid-cols-2 gap-4 text-[10px] mb-4">
-                                                <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
+                                                <div className="bg-zinc-900 p-3 rounded-xl">
                                                     <div className="text-zinc-600 font-bold uppercase mb-1">Jelszó</div>
-                                                    <input type="text" className="w-full bg-transparent p-0 outline-none font-bold" value={s.password} onChange={async (e) => {
-                                                        await api('/shares/'+s._id, 'PATCH', {password: e.target.value}); loadAdmin();
-                                                    }} />
+                                                    <div className="font-bold text-white mono">{s.password}</div>
                                                 </div>
-                                                <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800 flex flex-col justify-center">
+                                                <div className="bg-zinc-900 p-3 rounded-xl">
                                                     <div className="text-zinc-600 font-bold uppercase mb-1">Rögzített IP</div>
                                                     <div className="truncate text-zinc-400 font-bold">{s.allowedIp || 'Várakozás...'}</div>
                                                 </div>
                                             </div>
                                             <div className="bg-white/5 rounded-xl p-3 text-[9px] mb-4 space-y-1">
                                                 <div className="flex justify-between"><span className="text-zinc-500">Utolsó indítás:</span><span className="text-white">{s.sessionStartedAt ? new Date(s.sessionStartedAt).toLocaleString('hu-HU') : 'Soha'}</span></div>
-                                                <div className="flex justify-between"><span className="text-zinc-500">Állapot:</span><span className={canUseAgain ? "text-green-500 font-bold" : "text-yellow-500 font-bold"}>{canUseAgain ? "MOST ELÉRHETŐ" : "VÁRAKOZIK"}</span></div>
-                                                <button onClick={() => api(`/shares/${s._id}/reset`, 'POST').then(loadAdmin)} className="w-full py-2 bg-blue-600/20 text-blue-500 rounded-lg font-bold uppercase mt-2">IP ÉS IDŐZÍTŐ TÖRLÉSE</button>
+                                                <div className="flex justify-between"><span className="text-zinc-500">Állapot:</span><span className={canUse ? "text-green-500" : "text-yellow-500"}>{canUse ? "HASZNÁLHATÓ" : "VÁRAKOZIK"}</span></div>
+                                                <button onClick={() => api(`/shares/${s._id}/reset`, 'POST').then(loadAdmin)} className="w-full py-2 bg-blue-600/20 text-blue-500 rounded-lg font-bold uppercase mt-2">Időzítő és IP törlése (RESET)</button>
                                             </div>
-                                            <div className="text-[9px] text-zinc-800 break-all select-all font-mono italic">{window.location.origin}/?share={s.shareToken}</div>
+                                            <div className="text-[9px] text-zinc-800 break-all font-mono select-all italic">{window.location.origin}/?share={s.shareToken}</div>
                                         </div>
                                     );
                                 })}
@@ -176,9 +175,13 @@
                 </div>
             );
 
+            // VENDÉG LOGIN
             if (view === 'guest') return (
                 <div className="flex h-screen flex-col items-center justify-center p-6 text-center">
-                    <div className="mb-8"><h1 className="text-4xl font-black mb-2">By Szaby</h1><p className="text-zinc-600 text-xs font-bold uppercase tracking-widest">Authenticator Service</p></div>
+                    <div className="mb-8">
+                        <h2 className="text-xs font-black uppercase tracking-[0.3em] text-zinc-600 mb-2">Authenticator</h2>
+                        <h1 className="text-4xl font-black tracking-tighter italic">By Szaby</h1>
+                    </div>
                     <div className="glass w-full max-w-md p-10 relative overflow-hidden shadow-2xl">
                         {!guestData ? (
                             <form onSubmit={async (e) => {
@@ -190,34 +193,35 @@
                                     else { setGuestData(d); setError(''); startRefresh(); }
                                 } catch (err) { setError(err.message); }
                             }}>
-                                <div className="mb-8 inline-block bg-white p-5 rounded-3xl text-black font-black text-2xl">?</div>
-                                <h1 className="mb-2 text-2xl font-black uppercase">Belépés</h1>
-                                <p className="mb-8 text-zinc-500 text-xs">Add meg az email címed és a jelszót.</p>
-                                {error && <div className="mb-6 text-red-500 text-xs font-bold bg-red-500/10 p-4 rounded-2xl">{error}</div>}
-                                <input placeholder="Email cím" type="email" className="mb-3 w-full rounded-2xl p-4 outline-none" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
+                                <h1 className="mb-2 text-2xl font-black">Vevő Belépés</h1>
+                                <p className="mb-8 text-zinc-500 text-xs leading-relaxed">Ez a rendszer prémium fiókok biztonságos kezelésére készült. Add meg a vásárolt emailt és jelszót.</p>
+                                {error && <div className="mb-6 text-red-500 text-xs font-bold bg-red-500/10 p-4 rounded-2xl border border-red-500/20">{error}</div>}
+                                <input placeholder="Vevő Email címe" type="email" className="mb-3 w-full rounded-2xl p-4 outline-none" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
                                 <input type="password" placeholder="Jelszó" className="mb-8 w-full rounded-2xl p-4 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} required />
-                                <button className="btn-white w-full py-5 text-sm uppercase tracking-widest shadow-xl">Folytatás</button>
+                                <button className="btn-white w-full py-5 text-sm uppercase tracking-widest shadow-xl shadow-white/5">Folytatás</button>
                             </form>
                         ) : (
-                            <div className="py-6 animate-pulse">
+                            <div className="py-6">
                                 <div className="mb-2 text-[10px] font-black uppercase text-zinc-500 tracking-widest">{guestData.name}</div>
-                                <div className="text-7xl font-black mono mb-10">{guestData.code}</div>
-                                <div className="inline-block bg-red-500/10 text-red-500 px-10 py-3 rounded-full text-[12px] font-black">IDŐ: {guestData.expiresIn} MP</div>
+                                <div className="text-7xl font-black mono tracking-tighter text-white mb-10">{guestData.code}</div>
+                                <div className="inline-block bg-red-500/10 text-red-500 px-10 py-3 rounded-full text-[12px] font-black border border-red-500/20 uppercase tracking-widest">IDŐ: {guestData.expiresIn} MP</div>
                             </div>
                         )}
                         {showModal && (
                             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 p-8 backdrop-blur-md">
                                 <div className="text-center">
-                                    <div className="mb-6 text-white bg-zinc-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">!</div>
-                                    <h2 className="mb-4 text-2xl font-black uppercase">Figyelem!</h2>
-                                    <p className="mb-10 text-sm text-zinc-400 leading-relaxed">Az OK gomb után pontosan <span className="text-white font-black uppercase">1 perced</span> lesz látni a kódot. Ezután 24 óra várakozás következik.</p>
+                                    <h2 className="mb-4 text-2xl font-black uppercase tracking-tighter">FIGYELEM!</h2>
+                                    <p className="mb-10 text-sm text-zinc-400 leading-relaxed">
+                                        Az OK gomb után pontosan <span className="text-white font-black uppercase">1 perced</span> lesz látni a kódot. 
+                                        Ez után a hozzáférésed 24 órára lezárul. Készen állsz?
+                                    </p>
                                     <button onClick={async () => {
                                         const st = new URLSearchParams(window.location.search).get('share');
                                         try {
                                             const d = await api('/public/get-code', 'POST', { token: st, email: guestEmail, password: guestPass, startTimer: true });
                                             setGuestData(d); setShowModal(false); startRefresh();
                                         } catch (e) { setError(e.message); setShowModal(false); }
-                                    }} className="btn-white w-full py-5 uppercase tracking-widest shadow-2xl">Értettem, mehet</button>
+                                    }} className="btn-white w-full py-5 uppercase tracking-widest shadow-2xl">ÉRTETTEM, MEHET</button>
                                 </div>
                             </div>
                         )}
@@ -225,7 +229,7 @@
                 </div>
             );
 
-            return <div className="p-10 text-center text-zinc-700">Hozzáférés megtagadva.</div>;
+            return null;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
