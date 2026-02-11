@@ -14,23 +14,25 @@ app.use(cors());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
-const JWT_SECRET = process.env.JWT_SECRET || 'top-secret-99';
+const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-123';
 const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- ADATBÁZIS MODELLEK (Nincs auto-törlés!) ---
+// --- MODELLEK (Nincs expires mező, így nem törlődik!) ---
 const Key = mongoose.model('Key', new mongoose.Schema({
-    name: String, secret: String, createdAt: { type: Date, default: Date.now }
+    name: { type: String, required: true },
+    secret: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
 }));
 
 const Share = mongoose.model('Share', new mongoose.Schema({
-    keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key' },
-    email: { type: String, lowercase: true, trim: true },
-    password: String,
-    shareToken: String,
+    keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key', required: true },
+    email: { type: String, lowercase: true, trim: true, required: true },
+    password: { type: String, required: true },
+    shareToken: { type: String, required: true, unique: true },
     allowedIp: { type: String, default: null },
-    sessionStartedAt: { type: Date, default: null },
+    sessionStartedAt: { type: Date, default: null }, // Az 1 perces ablak kezdete
     createdAt: { type: Date, default: Date.now }
 }));
 
@@ -76,20 +78,21 @@ app.get('/api/shares', auth, async (req, res) => {
 
 app.post('/api/shares', auth, async (req, res) => {
     const share = new Share({
-        keyId: req.body.keyId, email: req.body.email,
+        keyId: req.body.keyId, email: req.body.email.trim().toLowerCase(),
         password: crypto.randomBytes(3).toString('hex'),
         shareToken: crypto.randomBytes(12).toString('hex')
     });
     await share.save(); res.json(share);
 });
 
-// IDŐZÍTŐ NULLÁZÁSA (RESET)
+// --- ÚJ RESET FUNKCIÓ AZ ADMINNAK ---
 app.post('/api/shares/:id/reset', auth, async (req, res) => {
-    await Share.findByIdAndUpdate(req.params.id, { sessionStartedAt: null });
+    await Share.findByIdAndUpdate(req.params.id, { sessionStartedAt: null, allowedIp: null });
     res.json({ success: true });
 });
 
 app.patch('/api/shares/:id', auth, async (req, res) => {
+    if (req.body.email) req.body.email = req.body.email.trim().toLowerCase();
     await Share.findByIdAndUpdate(req.params.id, req.body);
     res.json({ success: true });
 });
@@ -110,7 +113,7 @@ app.post('/api/public/get-code', async (req, res) => {
     }
 
     if (!share.allowedIp) { share.allowedIp = clientIp; await share.save(); }
-    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'IP tiltás!' });
+    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Eszközvédelem aktív!' });
 
     const now = new Date();
     const ONE_MINUTE = 60000;
@@ -128,13 +131,13 @@ app.post('/api/public/get-code', async (req, res) => {
 
     if (isCooldown && !isActive) {
         const nextDate = new Date(share.sessionStartedAt.getTime() + DAY);
-        return res.status(403).json({ error: `Lejárt a kereted. Újra ekkor: ${nextDate.toLocaleString('hu-HU')}` });
+        return res.status(403).json({ error: `Napi keret lejárt. Újra: ${nextDate.toLocaleString('hu-HU')}` });
     }
 
     if (!isActive && !startTimer) return res.json({ ready: true });
 
     res.json({
-        name: share.keyId?.name || "Ismeretlen",
+        name: share.keyId?.name || "Authenticator",
         code: otplib.authenticator.generate(share.keyId.secret),
         remaining: otplib.authenticator.timeRemaining(),
         expiresIn: Math.max(0, Math.floor((ONE_MINUTE - (now - share.sessionStartedAt)) / 1000))
@@ -143,4 +146,4 @@ app.post('/api/public/get-code', async (req, res) => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-mongoose.connect(MONGO_URI).then(() => app.listen(PORT));
+mongoose.connect(MONGO_URI).then(() => app.listen(PORT, () => console.log("Szerver fut")));
