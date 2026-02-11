@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authenticator Pro</title>
+    <title>AUTH PRO - STABLE</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; }
-        .glass { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 24px; }
-        .btn-white { background: #fff; color: #000; font-weight: 900; border-radius: 12px; }
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;900&display=swap');
+        body { background: #000; color: #fff; font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 28px; }
+        .btn-white { background: #fff; color: #000; font-weight: 900; border-radius: 14px; }
         input { background: #111 !important; border: 1px solid #222 !important; color: white !important; }
         .mono { font-family: monospace; letter-spacing: 2px; }
     </style>
@@ -102,7 +103,7 @@
                                 localStorage.setItem('admin_token', d.token); setToken(d.token);
                             } catch (e) { alert(e.message); }
                         }}>
-                            <input name="pass" type="password" placeholder="Mesterjelszó" className="mb-4 w-full rounded-xl p-4 outline-none" required />
+                            <input name="pass" type="password" placeholder="Jelszó" className="mb-4 w-full rounded-2xl p-4 outline-none" required />
                             <button className="btn-white w-full py-4 uppercase">Belépés</button>
                         </form>
                     </div>
@@ -111,16 +112,16 @@
 
             if (view === 'admin') return (
                 <div className="mx-auto max-w-6xl p-6 md:p-12">
-                    <header className="flex justify-between items-center mb-12 border-b border-zinc-900 pb-6">
-                        <h1 className="text-xl font-black italic uppercase">Authenticator <span className="text-zinc-700">Pro</span></h1>
-                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500 font-bold text-xs uppercase tracking-widest">Kilépés</button>
-                    </header>
+                    <div className="flex justify-between items-center mb-12 border-b border-zinc-900 pb-6">
+                        <h1 className="text-xl font-black italic">AUTH PRO</h1>
+                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500 font-bold text-xs uppercase">Kilépés</button>
+                    </div>
                     <div className="grid gap-10 lg:grid-cols-2">
                         <section>
                             <div className="mb-6 flex items-center justify-between text-zinc-500">
-                                <h2 className="text-xs font-bold uppercase tracking-widest">Kulcsok</h2>
+                                <h2 className="text-xs font-bold uppercase tracking-widest">Saját Kulcsok</h2>
                                 <button onClick={async () => {
-                                    const name = prompt('Kulcs neve:'); const secret = prompt('Secret:');
+                                    const name = prompt('Név:'); const secret = prompt('Secret:');
                                     if(name && secret) { await api('/keys', 'POST', {name, secret}); loadAdmin(); }
                                 }} className="text-[10px] bg-white text-black px-3 py-1 rounded-full font-black">+ ÚJ</button>
                             </div>
@@ -143,15 +144,13 @@
                             <h2 className="mb-6 text-xs font-bold uppercase tracking-widest text-zinc-500">Megosztások</h2>
                             <div className="space-y-4">
                                 {shares.map(s => {
-                                    const diff = s.sessionStartedAt ? (new Date() - new Date(s.sessionStartedAt)) : 86400001;
-                                    const canUseAgain = diff >= 86400000;
-                                    const isActive = diff < 60000;
-
+                                    const nextUse = s.sessionStartedAt ? new Date(new Date(s.sessionStartedAt).getTime() + 86400000) : null;
+                                    const canUse = !nextUse || new Date() > nextUse;
                                     return (
                                         <div key={s._id} className="glass p-6">
                                             <div className="mb-4 flex justify-between items-center">
                                                 <span className="font-bold text-white text-sm">{s.email}</span>
-                                                <button onClick={async () => { if(confirm('Törlöd?')) { await api('/shares/'+s._id, 'DELETE'); loadAdmin(); } }} className="text-zinc-700 text-xs hover:text-red-500">Törlés</button>
+                                                <button onClick={async () => { if(confirm('Törlöd?')) { await api('/shares/'+s._id, 'DELETE'); loadAdmin(); } }} className="text-zinc-700 text-xs">Törlés</button>
                                             </div>
                                             <div className="grid grid-cols-2 gap-4 text-[10px] mb-4">
                                                 <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
@@ -162,24 +161,22 @@
                                                 </div>
                                                 <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800 flex justify-between items-center">
                                                     <div className="truncate w-24 text-zinc-400 font-bold">{s.allowedIp || 'Nincs IP'}</div>
-                                                    {s.allowedIp && <button onClick={() => api('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(loadAdmin)} className="text-red-500 font-bold">↻</button>}
+                                                    {s.allowedIp && <button onClick={() => api('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(loadAdmin)} className="text-red-500">↻</button>}
                                                 </div>
                                             </div>
-                                            {/* ÚJ IDŐZÍTŐ ÉS RESET GOMB */}
-                                            <div className="bg-white/5 rounded-xl p-3 border border-white/5 space-y-2 text-[9px]">
-                                                <div className="flex justify-between">
-                                                    <span className="text-zinc-500">Állapot:</span>
-                                                    <span className={isActive ? "text-green-500" : (canUseAgain ? "text-blue-500" : "text-yellow-500")}>
-                                                        {isActive ? "AKTÍV HASZNÁLAT" : (canUseAgain ? "HASZNÁLHATÓ" : "VÁRAKOZIK")}
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-zinc-500">Utolsó indítás:</span>
+                                            {/* RESET ÉS IDŐZÍTŐ ADATOK */}
+                                            <div className="bg-white/5 rounded-xl p-3 text-[9px] mb-4">
+                                                <div className="flex justify-between mb-2">
+                                                    <span className="text-zinc-500">Utolsó használat:</span>
                                                     <span className="text-white">{s.sessionStartedAt ? new Date(s.sessionStartedAt).toLocaleString('hu-HU') : 'Soha'}</span>
                                                 </div>
-                                                <button onClick={() => api(`/shares/${s._id}/reset`, 'POST').then(loadAdmin)} className="w-full py-2 bg-red-600/20 text-red-500 rounded-lg font-bold uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all">Várakozás törlése (RESET)</button>
+                                                <div className="flex justify-between mb-4">
+                                                    <span className="text-zinc-500">Állapot:</span>
+                                                    <span className={canUse ? "text-green-500 font-bold" : "text-yellow-500 font-bold"}>{canUse ? "HASZNÁLHATÓ" : "VÁRAKOZIK"}</span>
+                                                </div>
+                                                <button onClick={() => api(`/shares/${s._id}/reset`, 'POST').then(loadAdmin)} className="w-full py-2 bg-blue-600/20 text-blue-500 rounded-lg font-bold uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">Időzítő törlése (RESET)</button>
                                             </div>
-                                            <div className="mt-4 pt-4 border-t border-zinc-900 text-[9px] text-zinc-700 break-all select-all italic">{window.location.origin}/?share={s.shareToken}</div>
+                                            <div className="text-[9px] text-zinc-700 break-all select-all font-mono italic">{window.location.origin}/?share={s.shareToken}</div>
                                         </div>
                                     );
                                 })}
@@ -194,9 +191,9 @@
                     <div className="glass w-full max-w-md p-10 relative overflow-hidden shadow-2xl">
                         {!guestData ? (
                             <form onSubmit={handleGuestVerify}>
-                                <div className="mb-8 inline-block bg-white p-5 rounded-3xl text-black font-black text-2xl shadow-xl shadow-white/10">?</div>
-                                <h1 className="mb-2 text-2xl font-black tracking-tight">BELÉPÉS</h1>
-                                <p className="mb-8 text-zinc-500 text-xs font-medium">Add meg az email címed és a jelszót.</p>
+                                <div className="mb-8 inline-block bg-white p-5 rounded-[2rem] text-black font-black text-2xl shadow-xl shadow-white/10">?</div>
+                                <h1 className="mb-2 text-2xl font-black">BELÉPÉS</h1>
+                                <p className="mb-8 text-zinc-500 text-xs">Add meg az email címed és a jelszót.</p>
                                 {error && <div className="mb-6 text-red-500 text-xs font-bold bg-red-500/10 p-4 rounded-2xl">{error}</div>}
                                 <input placeholder="Email cím" type="email" className="mb-3 w-full rounded-2xl p-4 outline-none" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
                                 <input type="password" placeholder="Jelszó" className="mb-8 w-full rounded-2xl p-4 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} required />
@@ -204,15 +201,15 @@
                             </form>
                         ) : (
                             <div className="py-6">
-                                <div className="mb-2 text-[10px] font-black uppercase text-zinc-500 tracking-[0.2em]">{guestData.name}</div>
-                                <div className="mb-10 text-7xl font-black mono tracking-tighter text-white">{guestData.code}</div>
-                                <div className="inline-block bg-red-500/10 text-red-500 px-8 py-3 rounded-full text-[12px] font-black border border-red-500/20 uppercase tracking-widest">Keret: {guestData.expiresIn} mp</div>
+                                <div className="mb-2 text-[10px] font-black uppercase text-zinc-500 tracking-widest">{guestData.name}</div>
+                                <div className="text-7xl font-black mono tracking-tighter text-white mb-10">{guestData.code}</div>
+                                <div className="inline-block bg-red-500/10 text-red-500 px-10 py-3 rounded-full text-[12px] font-black border border-red-500/20 uppercase tracking-widest">Keret: {guestData.expiresIn} mp</div>
                             </div>
                         )}
                         {showModal && (
                             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 p-8 backdrop-blur-md">
                                 <div className="text-center">
-                                    <div className="mb-6 text-white bg-zinc-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">!</div>
+                                    <div className="mb-6 text-white bg-zinc-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto text-2xl font-bold italic">!</div>
                                     <h2 className="mb-4 text-2xl font-black uppercase">Figyelem!</h2>
                                     <p className="mb-10 text-sm text-zinc-400 leading-relaxed">Az OK gomb megnyomása után pontosan <span className="text-white font-black uppercase">1 perced</span> lesz látni a kódot. Ezután a hozzáférésed 24 órára lezárul.</p>
                                     <button onClick={confirmAndStart} className="btn-white w-full py-5 uppercase tracking-widest shadow-2xl">Értettem, mehet</button>
