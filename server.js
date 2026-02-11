@@ -14,7 +14,7 @@ app.use(cors());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
-const JWT_SECRET = process.env.JWT_SECRET || 'szaby-titkos-kulcs-2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'szaby-secret-2024';
 const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -38,7 +38,7 @@ const auth = (req, res, next) => {
     try {
         const decoded = jwt.verify(req.headers.authorization, JWT_SECRET);
         next();
-    } catch (e) { res.status(401).json({ error: 'Admin auth szükséges' }); }
+    } catch (e) { res.status(401).json({ error: 'Nincs belépve' }); }
 };
 
 // --- ADMIN API ---
@@ -50,14 +50,12 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/keys', auth, async (req, res) => {
-    try {
-        const keys = await Key.find();
-        res.json(keys.map(k => ({
-            id: k._id, name: k.name,
-            code: otplib.authenticator.generate(k.secret),
-            remaining: otplib.authenticator.timeRemaining()
-        })));
-    } catch(e) { res.status(500).json({error: "Hiba"}); }
+    const keys = await Key.find();
+    res.json(keys.map(k => ({
+        id: k._id, name: k.name,
+        code: otplib.authenticator.generate(k.secret),
+        remaining: otplib.authenticator.timeRemaining()
+    })));
 });
 
 app.post('/api/keys', auth, async (req, res) => {
@@ -85,14 +83,9 @@ app.post('/api/shares', auth, async (req, res) => {
     await share.save(); res.json(share);
 });
 
-// TELJES RESET: Időzítő és IP törlése
+// TELJES RESET: Időzítő és IP törlése, hogy újra használható legyen
 app.post('/api/shares/:id/reset', auth, async (req, res) => {
     await Share.findByIdAndUpdate(req.params.id, { sessionStartedAt: null, allowedIp: null });
-    res.json({ success: true });
-});
-
-app.patch('/api/shares/:id', auth, async (req, res) => {
-    await Share.findByIdAndUpdate(req.params.id, req.body);
     res.json({ success: true });
 });
 
@@ -112,7 +105,7 @@ app.post('/api/public/get-code', async (req, res) => {
     }
 
     if (!share.allowedIp) { share.allowedIp = clientIp; await share.save(); }
-    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Ez a kulcs más eszközhöz van kötve!' });
+    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'IP tiltás: Ez a kulcs egy másik eszközhöz van kötve!' });
 
     const now = new Date();
     const ONE_MINUTE = 60000;
@@ -130,7 +123,7 @@ app.post('/api/public/get-code', async (req, res) => {
 
     if (isCooldown && !isActive) {
         const nextDate = new Date(share.sessionStartedAt.getTime() + DAY);
-        return res.status(403).json({ error: `Keret lejárt. Újra: ${nextDate.toLocaleString('hu-HU')}` });
+        return res.status(403).json({ error: `A napi kereted lejárt. Újra ekkor: ${nextDate.toLocaleString('hu-HU')}` });
     }
 
     if (!isActive && !startTimer) return res.json({ ready: true });
