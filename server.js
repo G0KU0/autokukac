@@ -14,25 +14,23 @@ app.use(cors());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/authenticator_db';
-const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-123';
+const JWT_SECRET = process.env.JWT_SECRET || 'titkos-kulcs-xyz';
 const MASTER_PASSWORD = process.env.MASTER_PASSWORD || 'admin123';
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- MODELLEK (Nincs expires mező, így nem törlődik!) ---
+// --- MODELLEK (Fixen törlés nélkül) ---
 const Key = mongoose.model('Key', new mongoose.Schema({
-    name: { type: String, required: true },
-    secret: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now }
+    name: String, secret: String, createdAt: { type: Date, default: Date.now }
 }));
 
 const Share = mongoose.model('Share', new mongoose.Schema({
-    keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key', required: true },
-    email: { type: String, lowercase: true, trim: true, required: true },
-    password: { type: String, required: true },
-    shareToken: { type: String, required: true, unique: true },
+    keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key' },
+    email: { type: String, lowercase: true, trim: true },
+    password: String,
+    shareToken: String,
     allowedIp: { type: String, default: null },
-    sessionStartedAt: { type: Date, default: null }, // Az 1 perces ablak kezdete
+    sessionStartedAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now }
 }));
 
@@ -40,10 +38,10 @@ const auth = (req, res, next) => {
     try {
         const decoded = jwt.verify(req.headers.authorization, JWT_SECRET);
         next();
-    } catch (e) { res.status(401).json({ error: 'Admin auth szükséges' }); }
+    } catch (e) { res.status(401).json({ error: 'Bejelentkezés szükséges' }); }
 };
 
-// --- ADMIN API ---
+// Admin API
 app.post('/api/login', (req, res) => {
     if (req.body.password === MASTER_PASSWORD) {
         return res.json({ token: jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' }) });
@@ -78,21 +76,20 @@ app.get('/api/shares', auth, async (req, res) => {
 
 app.post('/api/shares', auth, async (req, res) => {
     const share = new Share({
-        keyId: req.body.keyId, email: req.body.email.trim().toLowerCase(),
+        keyId: req.body.keyId, email: req.body.email,
         password: crypto.randomBytes(3).toString('hex'),
         shareToken: crypto.randomBytes(12).toString('hex')
     });
     await share.save(); res.json(share);
 });
 
-// --- ÚJ RESET FUNKCIÓ AZ ADMINNAK ---
+// IDŐZÍTŐ RESET (Ez az, amit kértél!)
 app.post('/api/shares/:id/reset', auth, async (req, res) => {
-    await Share.findByIdAndUpdate(req.params.id, { sessionStartedAt: null, allowedIp: null });
+    await Share.findByIdAndUpdate(req.params.id, { sessionStartedAt: null });
     res.json({ success: true });
 });
 
 app.patch('/api/shares/:id', auth, async (req, res) => {
-    if (req.body.email) req.body.email = req.body.email.trim().toLowerCase();
     await Share.findByIdAndUpdate(req.params.id, req.body);
     res.json({ success: true });
 });
@@ -102,7 +99,7 @@ app.delete('/api/shares/:id', auth, async (req, res) => {
     res.json({ success: true });
 });
 
-// --- VENDÉG API ---
+// VENDÉG API (Kétlépcsős kódlekérés)
 app.post('/api/public/get-code', async (req, res) => {
     const { token, email, password, startTimer } = req.body;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip;
@@ -113,7 +110,7 @@ app.post('/api/public/get-code', async (req, res) => {
     }
 
     if (!share.allowedIp) { share.allowedIp = clientIp; await share.save(); }
-    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Eszközvédelem aktív!' });
+    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'IP tiltás!' });
 
     const now = new Date();
     const ONE_MINUTE = 60000;
@@ -131,13 +128,13 @@ app.post('/api/public/get-code', async (req, res) => {
 
     if (isCooldown && !isActive) {
         const nextDate = new Date(share.sessionStartedAt.getTime() + DAY);
-        return res.status(403).json({ error: `Napi keret lejárt. Újra: ${nextDate.toLocaleString('hu-HU')}` });
+        return res.status(403).json({ error: `Keret lejárt. Következő: ${nextDate.toLocaleString('hu-HU')}` });
     }
 
     if (!isActive && !startTimer) return res.json({ ready: true });
 
     res.json({
-        name: share.keyId?.name || "Authenticator",
+        name: share.keyId?.name || "Kód",
         code: otplib.authenticator.generate(share.keyId.secret),
         remaining: otplib.authenticator.timeRemaining(),
         expiresIn: Math.max(0, Math.floor((ONE_MINUTE - (now - share.sessionStartedAt)) / 1000))
@@ -146,4 +143,4 @@ app.post('/api/public/get-code', async (req, res) => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-mongoose.connect(MONGO_URI).then(() => app.listen(PORT, () => console.log("Szerver fut")));
+mongoose.connect(MONGO_URI).then(() => app.listen(PORT, () => console.log(`Fut a ${PORT} porton`)));
