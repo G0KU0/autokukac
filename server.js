@@ -26,7 +26,7 @@ const Key = mongoose.model('Key', new mongoose.Schema({
 
 const Share = mongoose.model('Share', new mongoose.Schema({
     keyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Key' },
-    email: String, // Név helyett Email
+    email: String, 
     password: String,
     shareToken: String,
     allowedIp: { type: String, default: null },
@@ -76,7 +76,8 @@ app.get('/api/shares', auth, async (req, res) => {
 
 app.post('/api/shares', auth, async (req, res) => {
     const share = new Share({
-        keyId: req.body.keyId, email: req.body.email,
+        keyId: req.body.keyId, 
+        email: req.body.email.trim().toLowerCase(), // Normalizálás
         password: crypto.randomBytes(3).toString('hex'),
         shareToken: crypto.randomBytes(12).toString('hex')
     });
@@ -84,6 +85,7 @@ app.post('/api/shares', auth, async (req, res) => {
 });
 
 app.patch('/api/shares/:id', auth, async (req, res) => {
+    if (req.body.email) req.body.email = req.body.email.trim().toLowerCase();
     await Share.findByIdAndUpdate(req.params.id, req.body);
     res.json({ success: true });
 });
@@ -93,38 +95,43 @@ app.delete('/api/shares/:id', auth, async (req, res) => {
     res.json({ success: true });
 });
 
-// VENDÉG API - KÓD LEKÉRÉSE (TIMER INDÍTÁSSAL)
+// VENDÉG API - BIZTONSÁGOS LEKÉRÉS
 app.post('/api/public/get-code', async (req, res) => {
     const { token, email, password, startTimer } = req.body;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip;
 
     const share = await Share.findOne({ shareToken: token }).populate('keyId');
-    if (!share || share.email !== email || share.password !== password) {
+    
+    // Email és jelszó ellenőrzés (kisbetűsítve)
+    if (!share || share.email !== email.trim().toLowerCase() || share.password !== password) {
         return res.status(401).json({ error: 'Hibás adatok!' });
     }
 
-    // IP Ellenőrzés
     if (!share.allowedIp) { share.allowedIp = clientIp; await share.save(); }
-    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Ez a kulcs egy másik eszközhöz van kötve!' });
+    else if (share.allowedIp !== clientIp) return res.status(403).json({ error: 'Ez a kulcs más eszközhöz van kötve!' });
 
     const now = new Date();
     const isNewDay = !share.sessionStartedAt || (now - share.sessionStartedAt) > 86400000;
 
-    // Ha még nem indult el a timer ma, és a felhasználó rákattintott az OK-ra
-    if (isNewDay && startTimer) {
-        share.sessionStartedAt = now;
-        await share.save();
-    } else if (isNewDay && !startTimer) {
-        // Csak visszaigazoljuk, hogy az adatok jók, de kódot nem küldünk
-        return res.json({ ready: true });
+    // Ha még nem indult el a timer ma
+    if (isNewDay) {
+        if (startTimer) {
+            share.sessionStartedAt = now;
+            await share.save();
+        } else {
+            // Csak sikeres login, de még nincs kód küldés
+            return res.json({ ready: true });
+        }
     }
 
     const elapsed = now - share.sessionStartedAt;
-    if (elapsed > 60000) return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott! Gyere vissza 24 óra múlva.' });
+    if (elapsed > 60000) {
+        return res.status(403).json({ error: 'A napi 1 perces kereted elfogyott! Gyere vissza holnap.' });
+    }
 
-    // Ha elindult a timer, küldjük a kódot
+    // Csak itt küldjük ki a kódot!
     res.json({
-        name: share.keyId.name,
+        name: share.keyId?.name || "Ismeretlen",
         code: otplib.authenticator.generate(share.keyId.secret),
         remaining: otplib.authenticator.timeRemaining(),
         expiresIn: Math.max(0, Math.floor((60000 - elapsed) / 1000))
