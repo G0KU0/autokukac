@@ -9,13 +9,14 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { background: #000; color: #fff; font-family: 'Inter', sans-serif; }
-        .glass { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 24px; }
-        .btn-white { background: #fff; color: #000; font-weight: 900; border-radius: 12px; transition: all 0.2s; }
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;900&display=swap');
+        body { background: #000; color: #fff; font-family: 'Plus Jakarta Sans', sans-serif; overflow-x: hidden; }
+        .glass { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 32px; }
+        .btn-white { background: #fff; color: #000; font-weight: 900; border-radius: 16px; transition: all 0.2s; }
         .btn-white:active { scale: 0.95; }
-        input { background: #111 !important; border: 1px solid #222 !important; color: white !important; }
+        input { background: #111 !important; border: 1px solid #222 !important; color: white !important; font-size: 16px !important; }
         .mono { font-family: monospace; letter-spacing: 2px; }
+        .modal-blur { backdrop-filter: blur(12px); background: rgba(0,0,0,0.8); }
     </style>
 </head>
 <body>
@@ -28,8 +29,6 @@
             const [token, setToken] = useState(localStorage.getItem('admin_token'));
             const [keys, setKeys] = useState([]);
             const [shares, setShares] = useState([]);
-            
-            // Guest states
             const [guestEmail, setGuestEmail] = useState('');
             const [guestPass, setGuestPass] = useState('');
             const [guestData, setGuestData] = useState(null);
@@ -50,7 +49,7 @@
                     body: body ? JSON.stringify(body) : null
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Hiba');
+                if (!res.ok) throw new Error(data.error || 'Szerver hiba');
                 return data;
             };
 
@@ -64,33 +63,36 @@
 
             useEffect(() => { if (view === 'admin') { loadAdmin(); const i = setInterval(loadAdmin, 10000); return () => clearInterval(i); } }, [view]);
 
-            // Vendég belépés (1. lépés: Ellenőrzés)
+            // Belépés ellenőrzése
             const handleGuestVerify = async (e) => {
                 e.preventDefault();
                 const st = new URLSearchParams(window.location.search).get('share');
                 try {
                     const d = await api('/public/get-code', 'POST', { token: st, email: guestEmail, password: guestPass, startTimer: false });
-                    if (d.ready) setShowModal(true); // Felugrik az ablak
-                    else setGuestData(d); // Ha már fut a timer, egyből mutatja
-                    setError('');
+                    if (d.ready) setShowModal(true);
+                    else { setGuestData(d); setError(''); startAutoRefresh(); }
                 } catch (e) { setError(e.message); }
             };
 
-            // Vendég kód kérése (2. lépés: OK gomb)
-            const startSession = async () => {
+            // Timer és kód indítása
+            const confirmAndStart = async () => {
                 const st = new URLSearchParams(window.location.search).get('share');
                 try {
                     const d = await api('/public/get-code', 'POST', { token: st, email: guestEmail, password: guestPass, startTimer: true });
                     setGuestData(d);
                     setShowModal(false);
-                    // Automatikus frissítés az 1 percen belül
-                    const i = setInterval(async () => {
-                        try {
-                            const d2 = await api('/public/get-code', 'POST', { token: st, email: guestEmail, password: guestPass, startTimer: false });
-                            setGuestData(d2);
-                        } catch (e) { setGuestData(null); setError(e.message); clearInterval(i); }
-                    }, 5000);
+                    startAutoRefresh();
                 } catch (e) { setError(e.message); setShowModal(false); }
+            };
+
+            const startAutoRefresh = () => {
+                const st = new URLSearchParams(window.location.search).get('share');
+                const i = setInterval(async () => {
+                    try {
+                        const d = await api('/public/get-code', 'POST', { token: st, email: guestEmail, password: guestPass, startTimer: false });
+                        setGuestData(d);
+                    } catch (e) { setGuestData(null); setError(e.message); clearInterval(i); }
+                }, 5000);
             };
 
             if (view === 'loading') return null;
@@ -98,7 +100,7 @@
             if (view === 'login') return (
                 <div className="flex h-screen items-center justify-center p-6 text-center">
                     <div className="glass w-full max-w-sm p-10">
-                        <h1 className="mb-8 text-xl font-black">ADMIN PANEL</h1>
+                        <h1 className="mb-8 text-xl font-black italic">ADMIN PANEL</h1>
                         <form onSubmit={async (e) => {
                             e.preventDefault();
                             try {
@@ -106,7 +108,7 @@
                                 localStorage.setItem('admin_token', d.token); setToken(d.token);
                             } catch (e) { alert(e.message); }
                         }}>
-                            <input name="pass" type="password" placeholder="Jelszó" className="mb-4 w-full rounded-xl p-4 outline-none" required />
+                            <input name="pass" type="password" placeholder="Mesterjelszó" className="mb-4 w-full rounded-2xl p-4 outline-none" required />
                             <button className="btn-white w-full py-4 uppercase">Belépés</button>
                         </form>
                     </div>
@@ -115,18 +117,18 @@
 
             if (view === 'admin') return (
                 <div className="mx-auto max-w-5xl p-6 md:p-12">
-                    <div className="mb-12 flex items-center justify-between border-b border-zinc-900 pb-6">
-                        <h1 className="text-xl font-black tracking-tighter">AUTHENTICATOR <span className="text-zinc-700">PRO</span></h1>
-                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500 font-bold text-xs uppercase">Kijelentkezés</button>
+                    <div className="mb-12 flex items-center justify-between">
+                        <h1 className="text-xl font-black tracking-tighter">AUTH<span className="text-zinc-700">PRO</span></h1>
+                        <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-zinc-500 font-bold text-xs uppercase">Kilépés</button>
                     </div>
-                    <div className="grid gap-12 md:grid-cols-2">
+                    <div className="grid gap-10 md:grid-cols-2">
                         <section>
                             <div className="mb-6 flex items-center justify-between">
                                 <h2 className="text-xs font-bold uppercase text-zinc-500">Kulcsok</h2>
                                 <button onClick={async () => {
-                                    const name = prompt('Kulcs neve:'); const secret = prompt('Secret:');
+                                    const name = prompt('Név:'); const secret = prompt('Secret:');
                                     if(name && secret) { await api('/keys', 'POST', {name, secret}); loadAdmin(); }
-                                }} className="text-[10px] bg-white text-black px-3 py-1 rounded-full font-black">+ ÚJ KULCS</button>
+                                }} className="text-[10px] bg-white text-black px-3 py-1 rounded-full font-black">+ ÚJ</button>
                             </div>
                             <div className="space-y-4">
                                 {keys.map(k => (
@@ -137,34 +139,34 @@
                                                 const email = prompt('Vendég email címe:');
                                                 if(email) { await api('/shares', 'POST', {keyId: k.id, email}); loadAdmin(); }
                                             }} className="bg-zinc-900 p-3 rounded-xl text-xs font-bold">Megosztás</button>
-                                            <button onClick={async () => { if(confirm('Törlöd?')) { await api('/keys/'+k.id, 'DELETE'); loadAdmin(); } }} className="text-red-500 p-3">×</button>
+                                            <button onClick={async () => { if(confirm('Törlöd?')) { await api('/keys/'+k.id, 'DELETE'); loadAdmin(); } }} className="text-red-500 p-3 font-bold">×</button>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </section>
                         <section>
-                            <h2 className="mb-6 text-xs font-bold uppercase text-zinc-500">Aktív Megosztások</h2>
+                            <h2 className="mb-6 text-xs font-bold uppercase text-zinc-500">Megosztások</h2>
                             <div className="space-y-4">
                                 {shares.map(s => (
                                     <div key={s._id} className="glass p-6">
                                         <div className="mb-4 flex justify-between items-center">
-                                            <span className="font-bold text-white text-sm">{s.email}</span>
+                                            <span className="font-bold text-white text-sm truncate w-40">{s.email}</span>
                                             <button onClick={async () => { if(confirm('Törlöd?')) { await api('/shares/'+s._id, 'DELETE'); loadAdmin(); } }} className="text-zinc-700 text-xs">Törlés</button>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4 text-[10px]">
-                                            <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
+                                        <div className="grid grid-cols-2 gap-3 text-[10px]">
+                                            <div className="bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
                                                 <div className="text-zinc-600 font-bold uppercase mb-1">Jelszó</div>
                                                 <input type="text" className="w-full bg-transparent p-0 outline-none font-bold" value={s.password} onChange={async (e) => {
                                                     await api('/shares/'+s._id, 'PATCH', {password: e.target.value}); loadAdmin();
                                                 }} />
                                             </div>
-                                            <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800 flex justify-between items-center">
+                                            <div className="bg-zinc-900 p-3 rounded-2xl border border-zinc-800 flex justify-between items-center">
                                                 <div className="truncate text-zinc-400 font-bold">{s.allowedIp || 'Nincs IP'}</div>
-                                                {s.allowedIp && <button onClick={() => api('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(loadAdmin)} className="text-red-500">↻</button>}
+                                                {s.allowedIp && <button onClick={() => api('/shares/'+s._id, 'PATCH', {allowedIp: null}).then(loadAdmin)} className="text-red-500 font-bold">↻</button>}
                                             </div>
                                         </div>
-                                        <div className="mt-4 pt-4 border-t border-zinc-900 text-[9px] text-zinc-700 break-all select-all mono">{window.location.origin}/?share={s.shareToken}</div>
+                                        <div className="mt-4 pt-4 border-t border-zinc-900 text-[9px] text-zinc-700 break-all select-all font-mono italic">{window.location.origin}/?share={s.shareToken}</div>
                                     </div>
                                 ))}
                             </div>
@@ -175,39 +177,36 @@
 
             if (view === 'guest') return (
                 <div className="flex h-screen items-center justify-center p-6 text-center">
-                    <div className="glass w-full max-w-md p-10 relative overflow-hidden">
+                    <div className="glass w-full max-w-md p-10 relative overflow-hidden shadow-2xl">
                         {!guestData ? (
                             <form onSubmit={handleGuestVerify}>
-                                <div className="mb-8 inline-block bg-white p-4 rounded-3xl text-black font-black text-2xl">?</div>
-                                <h1 className="mb-2 text-2xl font-black">BEJELENTKEZÉS</h1>
-                                <p className="mb-8 text-zinc-500 text-xs">Add meg az email címedet és a jelszót.</p>
-                                {error && <div className="mb-4 text-red-500 text-xs font-bold bg-red-500/10 p-3 rounded-xl">{error}</div>}
-                                <input placeholder="Email cím" type="email" className="mb-3 w-full rounded-xl p-4 outline-none" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
-                                <input type="password" placeholder="Jelszó" className="mb-8 w-full rounded-xl p-4 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} required />
-                                <button className="btn-white w-full py-4 text-sm uppercase tracking-tighter">Folytatás</button>
+                                <div className="mb-8 inline-block bg-white p-5 rounded-[24px] text-black font-black text-2xl shadow-lg shadow-white/10">?</div>
+                                <h1 className="mb-2 text-2xl font-black tracking-tight">BELÉPÉS</h1>
+                                <p className="mb-8 text-zinc-500 text-xs font-medium">Add meg az email címed és a jelszót.</p>
+                                {error && <div className="mb-6 text-red-500 text-xs font-bold bg-red-500/10 p-4 rounded-2xl border border-red-500/20">{error}</div>}
+                                <input placeholder="Email cím" type="email" className="mb-3 w-full rounded-2xl p-4 outline-none" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
+                                <input type="password" placeholder="Jelszó" className="mb-8 w-full rounded-2xl p-4 outline-none" value={guestPass} onChange={e => setGuestPass(e.target.value)} required />
+                                <button className="btn-white w-full py-5 text-sm uppercase tracking-widest shadow-xl shadow-white/5">Folytatás</button>
                             </form>
                         ) : (
-                            <div className="py-6">
-                                <div className="mb-2 text-[10px] font-black uppercase text-zinc-500 tracking-widest">{guestData.name}</div>
-                                <div className="mb-10 text-7xl font-black mono tracking-tighter text-white">{guestData.code}</div>
-                                <div className="inline-block bg-red-500/10 text-red-500 px-6 py-2 rounded-full text-[10px] font-black">
-                                    HÁTRALEVŐ KERET: {guestData.expiresIn} MP
+                            <div className="py-6 animate-in fade-in zoom-in duration-500">
+                                <div className="mb-2 text-[10px] font-black uppercase text-zinc-500 tracking-[0.2em]">{guestData.name}</div>
+                                <div className="mb-10 text-7xl font-black mono tracking-tighter text-white drop-shadow-2xl">{guestData.code}</div>
+                                <div className="inline-block bg-red-500/10 text-red-500 px-8 py-3 rounded-full text-[11px] font-black border border-red-500/20">
+                                    KERET: {guestData.expiresIn} MP
                                 </div>
                             </div>
                         )}
 
-                        {/* FIGYELMEZTETŐ ABLAK (MODAL) */}
                         {showModal && (
-                            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 p-6 backdrop-blur-md">
+                            <div className="absolute inset-0 z-50 flex items-center justify-center modal-blur p-8 animate-in fade-in duration-300">
                                 <div className="text-center">
-                                    <div className="mb-6 text-yellow-500">
-                                        <svg className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                        </svg>
+                                    <div className="mb-6 text-white bg-zinc-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+                                        <span className="text-2xl font-bold">!</span>
                                     </div>
-                                    <h2 className="mb-4 text-xl font-black">FIGYELEM!</h2>
-                                    <p className="mb-8 text-sm text-zinc-400">Az OK gomb megnyomása után pontosan <span className="text-white font-bold">1 PERCED</span> lesz használni az aktiváló kulcsot. Ezután a hozzáférésed 24 órára lezárul.</p>
-                                    <button onClick={startSession} className="btn-white w-full py-4 uppercase">Értettem, mehet</button>
+                                    <h2 className="mb-4 text-2xl font-black uppercase">Figyelem!</h2>
+                                    <p className="mb-10 text-sm text-zinc-400 leading-relaxed">Az OK gomb után pontosan <span className="text-white font-black">1 PERCED</span> lesz a kód használatára. Ezután a hozzáférés 24 órára lezárul.</p>
+                                    <button onClick={confirmAndStart} className="btn-white w-full py-5 uppercase tracking-widest shadow-2xl">ÉRTETTEM, MEHET</button>
                                 </div>
                             </div>
                         )}
@@ -215,7 +214,7 @@
                 </div>
             );
 
-            return <div className="p-10 text-center text-zinc-800">Nincs hozzáférésed.</div>;
+            return null;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
