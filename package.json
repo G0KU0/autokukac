@@ -1,6 +1,6 @@
 {
-  "name": "auth-szaby-final",
-  "version": "2.0.0",
+  "name": "auth-pro-szaby",
+  "version": "2.1.0",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
   "dependencies": {
